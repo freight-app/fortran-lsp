@@ -1,0 +1,12 @@
+[package]
+name = "fortran-lsp"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Native Rust Fortran language intelligence primitives for freight lsp"
+
+[lib]
+name = "fortran_lsp"
+path = "src/lib.rs"
+
+[dependencies]
