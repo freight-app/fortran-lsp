@@ -2409,6 +2409,9 @@ fn eval_integer_expr(expr: &str, defs: &HashMap<String, String>) -> i64 {
     if let Some(rest) = expr.strip_prefix('-') {
         return -eval_atom_value(rest, defs);
     }
+    if let Some(rest) = expr.strip_prefix('~') {
+        return !eval_atom_value(rest, defs);
+    }
     0
 }
 
