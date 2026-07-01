@@ -4392,6 +4392,49 @@ end module",
 }
 
 #[test]
+fn unresolved_parent_module_uses_suppress_deferred_override_cascades() {
+    let mut ws = Workspace::new();
+    ws.upsert_file(
+        PathBuf::from("base.f90"),
+        "module base\n\
+use missing_api, only: toml_table\n\
+type, abstract :: serializable_t\n\
+contains\n\
+procedure(dump_iface), deferred :: dump_to_toml\n\
+procedure(load_iface), deferred :: load_from_toml\n\
+end type\n\
+type, extends(serializable_t) :: dependency_tree_t\n\
+contains\n\
+procedure :: dump_to_toml\n\
+procedure :: load_from_toml\n\
+end type\n\
+end module",
+    );
+    ws.upsert_file(
+        PathBuf::from("test.f90"),
+        "module test\n\
+use base, only: dependency_tree_t\n\
+type, extends(dependency_tree_t) :: mock_dependency_tree_t\n\
+contains\n\
+procedure :: resolve_dependency\n\
+end type\n\
+contains\n\
+subroutine resolve_dependency(self)\n\
+class(mock_dependency_tree_t) :: self\n\
+end subroutine\n\
+end module",
+    );
+
+    let diagnostics = ws.diagnostics(Path::new("test.f90"));
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diag| !diag.message.contains("deferred procedure")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn reports_unresolved_type_bound_procedure_targets() {
     let mut ws = Workspace::new();
     let src = "module m\n\

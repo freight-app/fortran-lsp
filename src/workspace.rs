@@ -2764,12 +2764,14 @@ impl Workspace {
             if ty.is_abstract {
                 continue;
             }
-
             let mut visited = HashSet::new();
             for method in self
                 .inherited_deferred_methods(parent, &mut visited)
                 .into_values()
             {
+                if self.symbol_module_has_unresolved_uses(method) {
+                    continue;
+                }
                 if !self.type_implements_method(ty, &method.name) {
                     diagnostics.push(Diagnostic {
                         range: ty.selection_range.clone(),
@@ -2787,6 +2789,9 @@ impl Workspace {
                     .ancestor_deferred_methods(parent, &mut visited)
                     .into_values()
                 {
+                    if self.symbol_module_has_unresolved_uses(method) {
+                        continue;
+                    }
                     if !self.type_implements_method(ty, &method.name) {
                         diagnostics.push(Diagnostic {
                             range: ty.selection_range.clone(),
@@ -3067,6 +3072,14 @@ impl Workspace {
         self.direct_type_methods(ty)
             .into_iter()
             .any(|method| method.name.eq_ignore_ascii_case(name) && !method.is_deferred)
+    }
+
+    fn symbol_module_has_unresolved_uses(&self, sym: &Symbol) -> bool {
+        let Some(module_name) = sym.scope.first() else {
+            return false;
+        };
+        self.find_module(module_name)
+            .is_some_and(|module| self.module_has_any_unresolved_uses(module))
     }
 
     fn type_has_direct_methods(&self, ty: &Symbol) -> bool {
@@ -3865,6 +3878,18 @@ impl Workspace {
                 self.find_module(&use_stmt.module).is_none()
                     && intrinsics::find_intrinsic_module(&use_stmt.module).is_none()
             })
+    }
+
+    fn module_has_any_unresolved_uses(&self, module: &Symbol) -> bool {
+        let Some(file) = self.files.get(&module.file) else {
+            return false;
+        };
+        let module_scope = [module.name.clone()];
+        file.uses.iter().any(|use_stmt| {
+            scopes_equal(&use_stmt.scope, &module_scope)
+                && self.find_module(&use_stmt.module).is_none()
+                && intrinsics::find_intrinsic_module(&use_stmt.module).is_none()
+        })
     }
 
     fn find_direct_type_generic_method_for_args<'a>(
