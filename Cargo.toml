@@ -10,3 +10,4 @@ name = "fortran_lsp"
 path = "src/lib.rs"
 
 [dependencies]
+serde_json = "1"
