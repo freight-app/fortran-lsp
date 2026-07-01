@@ -2327,6 +2327,7 @@ fn eval_not(expr: &str, defs: &HashMap<String, String>) -> bool {
 }
 
 fn eval_comparison(expr: &str, defs: &HashMap<String, String>) -> bool {
+    let expr = strip_outer_parens(expr.trim());
     for op in ["<=", ">=", "!=", "==", "<", ">"] {
         if let Some((lhs, rhs)) = split_top_level_once(expr, op) {
             let lhs = eval_atom_value(lhs, defs);
@@ -2354,7 +2355,7 @@ fn eval_atom_value(expr: &str, defs: &HashMap<String, String>) -> i64 {
     if let Some(name) = parse_defined(expr) {
         return i64::from(defs.contains_key(name));
     }
-    if let Ok(value) = expr.parse::<i64>() {
+    if let Some(value) = parse_preprocessor_integer(expr) {
         return value;
     }
     if let Some(value) = defs.get(expr) {
@@ -2364,7 +2365,68 @@ fn eval_atom_value(expr: &str, defs: &HashMap<String, String>) -> i64 {
         }
         return eval_atom_value(value, defs);
     }
+    eval_integer_expr(expr, defs)
+}
+
+fn eval_integer_expr(expr: &str, defs: &HashMap<String, String>) -> i64 {
+    let expr = strip_outer_parens(expr.trim());
+    for op in ["|", "^", "&", "<<", ">>", "+", "-", "*", "/", "%"] {
+        if let Some(parts) = split_top_level_integer_operator(expr, op) {
+            let mut values = parts.into_iter().map(|part| eval_atom_value(part, defs));
+            let Some(first) = values.next() else {
+                return 0;
+            };
+            return values.fold(first, |lhs, rhs| match op {
+                "|" => lhs | rhs,
+                "^" => lhs ^ rhs,
+                "&" => lhs & rhs,
+                "<<" => lhs.checked_shl(rhs.max(0) as u32).unwrap_or(0),
+                ">>" => lhs.checked_shr(rhs.max(0) as u32).unwrap_or(0),
+                "+" => lhs + rhs,
+                "-" => lhs - rhs,
+                "*" => lhs * rhs,
+                "/" => {
+                    if rhs == 0 {
+                        0
+                    } else {
+                        lhs / rhs
+                    }
+                }
+                "%" => {
+                    if rhs == 0 {
+                        0
+                    } else {
+                        lhs % rhs
+                    }
+                }
+                _ => 0,
+            });
+        }
+    }
+    if let Some(rest) = expr.strip_prefix('+') {
+        return eval_atom_value(rest, defs);
+    }
+    if let Some(rest) = expr.strip_prefix('-') {
+        return -eval_atom_value(rest, defs);
+    }
     0
+}
+
+fn parse_preprocessor_integer(expr: &str) -> Option<i64> {
+    let trimmed = expr.trim();
+    let number = trimmed
+        .trim_end_matches(|ch: char| matches!(ch, 'u' | 'U' | 'l' | 'L'))
+        .replace('\'', "");
+    if let Some(hex) = number
+        .strip_prefix("0x")
+        .or_else(|| number.strip_prefix("0X"))
+    {
+        i64::from_str_radix(hex, 16).ok()
+    } else if number.len() > 1 && number.starts_with('0') {
+        i64::from_str_radix(&number[1..], 8).ok()
+    } else {
+        number.parse::<i64>().ok()
+    }
 }
 
 fn parse_defined(expr: &str) -> Option<&str> {
@@ -2418,6 +2480,57 @@ fn split_top_level_operator<'a>(expr: &'a str, op: &str) -> Option<Vec<&'a str>>
         parts.push(expr[start..].trim());
         Some(parts)
     }
+}
+
+fn split_top_level_integer_operator<'a>(expr: &'a str, op: &str) -> Option<Vec<&'a str>> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+    let bytes = expr.as_bytes();
+    let op_bytes = op.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        match bytes[idx] as char {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth == 0
+            && bytes[idx..].starts_with(op_bytes)
+            && !integer_operator_is_logical_neighbor(bytes, idx, op)
+            && !integer_operator_is_unary(expr, idx, op)
+        {
+            parts.push(expr[start..idx].trim());
+            idx += op_bytes.len();
+            start = idx;
+            continue;
+        }
+        idx += 1;
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        parts.push(expr[start..].trim());
+        Some(parts)
+    }
+}
+
+fn integer_operator_is_logical_neighbor(bytes: &[u8], idx: usize, op: &str) -> bool {
+    matches!(op, "|" | "&")
+        && (bytes.get(idx + 1) == Some(&bytes[idx])
+            || idx.checked_sub(1).and_then(|prev| bytes.get(prev)) == Some(&bytes[idx]))
+}
+
+fn integer_operator_is_unary(expr: &str, idx: usize, op: &str) -> bool {
+    if !matches!(op, "+" | "-") {
+        return false;
+    }
+    let before = expr[..idx].trim_end();
+    before.is_empty()
+        || before
+            .chars()
+            .last()
+            .is_some_and(|ch| matches!(ch, '(' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^'))
 }
 
 fn split_top_level_once<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {

@@ -55,7 +55,9 @@ Next useful work:
 
 - [ ] Fuller C-preprocessor expression support. Implemented today:
       conditionals, `defined(...)`, `!`, `&&`, `||`, `==`, `!=`, numeric
-      ordering comparisons, and object/function-like macro expansion.
+      ordering comparisons, integer arithmetic, bitwise operators, shifts,
+      hex/octal literals, C integer suffixes, and object/function-like macro
+      expansion.
 - [ ] Broader polymorphic dispatch modelling when multiple runtime target types
       are possible.
 - [ ] Richer diagnostics for procedure/type interface compatibility.
@@ -111,4 +113,3 @@ python3 scripts/fortran_lsp_compare.py --freight target/debug/freight \
 
 For large symbol-heavy projects such as quadpack, raise `--request-timeout` to
 90 seconds before assuming a hang.
-
