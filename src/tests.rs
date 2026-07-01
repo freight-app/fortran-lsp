@@ -4852,13 +4852,18 @@ fn type_bound_generic_signature_help_picks_matching_argument_count() {
 type :: circle\n\
 contains\n\
 procedure :: draw => draw_circle\n\
+procedure :: draw_by_width => draw_circle_by_width\n\
 procedure :: draw_wide => draw_circle_wide\n\
-generic :: render => draw, draw_wide\n\
+generic :: render => draw, draw_by_width, draw_wide\n\
 end type\n\
 contains\n\
 subroutine draw_circle(self, color)\n\
 class(circle) :: self\n\
 integer :: color\n\
+end subroutine\n\
+subroutine draw_circle_by_width(self, width)\n\
+class(circle) :: self\n\
+integer :: width\n\
 end subroutine\n\
 subroutine draw_circle_wide(self, color, width)\n\
 class(circle) :: self\n\
@@ -4875,6 +4880,15 @@ end module";
         .unwrap();
     assert_eq!(sig.label, "draw(color)");
     assert_eq!(sig.parameters, vec!["color"]);
+
+    let keyword_arg =
+        "program app\nuse m\nclass(circle) :: c\ncall c%render(width=wide)\nend program";
+    ws.upsert_file(PathBuf::from("keyword.f90"), keyword_arg);
+    let sig = ws
+        .signature_help(Path::new("keyword.f90"), Position::new(3, 22), keyword_arg)
+        .unwrap();
+    assert_eq!(sig.label, "draw_by_width(width)");
+    assert_eq!(sig.parameters, vec!["width"]);
 
     let two_args = "program app\nuse m\nclass(circle) :: c\ncall c%render(red, width)\nend program";
     ws.upsert_file(PathBuf::from("two.f90"), two_args);

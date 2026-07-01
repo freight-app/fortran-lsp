@@ -1003,9 +1003,13 @@ impl Workspace {
     ) -> Option<SignatureHelp> {
         let call = call_context(source, pos)?;
         if let Some(receiver) = &call.receiver {
-            if let Some(method) =
-                self.find_member_method_for_call(path, receiver, &call.name, call.argument_count)
-            {
+            if let Some(method) = self.find_member_method_for_call(
+                path,
+                receiver,
+                &call.name,
+                call.argument_count,
+                call.active_argument_name.as_deref(),
+            ) {
                 if let Some(help) = self.method_signature_help(
                     method,
                     call.active_parameter,
@@ -1023,7 +1027,11 @@ impl Workspace {
             ) {
                 return Some(help);
             }
-            if let Some(target) = self.find_generic_interface_procedure(sym, call.argument_count) {
+            if let Some(target) = self.find_generic_interface_procedure_for_signature(
+                sym,
+                call.argument_count,
+                call.active_argument_name.as_deref(),
+            ) {
                 return Some(SignatureHelp {
                     label: procedure_signature_label(target),
                     parameters: target.args.clone(),
@@ -1331,7 +1339,8 @@ impl Workspace {
         argument_count: usize,
     ) -> Option<Vec<CallParameter>> {
         if let Some(receiver) = receiver {
-            let method = self.find_member_method_for_call(path, receiver, name, argument_count)?;
+            let method =
+                self.find_member_method_for_call(path, receiver, name, argument_count, None)?;
             let target = self.method_target_symbol(method)?;
             let params = self.method_call_parameters(method, target);
             if params.is_empty() && argument_count > 0 {
@@ -1462,7 +1471,7 @@ impl Workspace {
     }
 
     fn find_member_method(&self, path: &Path, receiver: &str, member: &str) -> Option<&Symbol> {
-        self.find_member_method_for_call(path, receiver, member, 0)
+        self.find_member_method_for_call(path, receiver, member, 0, None)
     }
 
     fn find_member_method_for_call(
@@ -1471,6 +1480,7 @@ impl Workspace {
         receiver: &str,
         member: &str,
         argument_count: usize,
+        active_keyword: Option<&str>,
     ) -> Option<&Symbol> {
         let receiver_sym = self.find_visible_symbol(path, receiver)?;
         let type_name = declared_type_name(receiver_sym)?;
@@ -1480,13 +1490,21 @@ impl Workspace {
             .find_type_method_recursive(ty, member, &mut visited)
             .or_else(|| {
                 let mut visited = HashSet::new();
-                self.find_type_generic_method_recursive(ty, member, argument_count, &mut visited)
+                self.find_type_generic_method_recursive(
+                    ty,
+                    member,
+                    argument_count,
+                    active_keyword,
+                    &mut visited,
+                )
             });
         if static_method.is_some_and(|method| !method.is_deferred) {
             return static_method;
         }
         if declared_type_is_class(receiver_sym) {
-            if let Some(method) = self.find_unique_descendant_method(ty, member, argument_count) {
+            if let Some(method) =
+                self.find_unique_descendant_method(ty, member, argument_count, active_keyword)
+            {
                 return Some(method);
             }
         }
@@ -1514,7 +1532,7 @@ impl Workspace {
             return static_method;
         }
         if declared_type_is_class(receiver_sym) {
-            if let Some(method) = self.find_unique_descendant_method(ty, member, args.len()) {
+            if let Some(method) = self.find_unique_descendant_method(ty, member, args.len(), None) {
                 return Some(method);
             }
         }
@@ -3160,11 +3178,20 @@ impl Workspace {
         interface: &'a Symbol,
         argument_count: usize,
     ) -> Option<&'a Symbol> {
+        self.find_generic_interface_procedure_for_signature(interface, argument_count, None)
+    }
+
+    fn find_generic_interface_procedure_for_signature<'a>(
+        &'a self,
+        interface: &'a Symbol,
+        argument_count: usize,
+        active_keyword: Option<&str>,
+    ) -> Option<&'a Symbol> {
         let candidates = self.generic_interface_procedures(interface);
-        candidates
-            .iter()
-            .copied()
-            .find(|procedure| procedure.args.len() == argument_count)
+        candidates.iter().copied().find(|procedure| {
+            procedure.args.len() == argument_count
+                && procedure_signature_matches_keyword(procedure, active_keyword)
+        })
     }
 
     fn find_generic_interface_procedure_for_args<'a>(
@@ -3380,20 +3407,28 @@ impl Workspace {
         ty: &'a Symbol,
         generic_name: &str,
         argument_count: usize,
+        active_keyword: Option<&str>,
         visited: &mut HashSet<String>,
     ) -> Option<&'a Symbol> {
         let key = ty.qualified_name().to_ascii_lowercase();
         if !visited.insert(key) {
             return None;
         }
-        if let Some(method) = self.find_direct_type_generic_method(ty, generic_name, argument_count)
+        if let Some(method) =
+            self.find_direct_type_generic_method(ty, generic_name, argument_count, active_keyword)
         {
             return Some(method);
         }
         let parent_name = ty.extends.as_ref()?;
         let file = self.files.get(&ty.file)?;
         let parent = self.find_parent_type(file, ty, parent_name)?;
-        self.find_type_generic_method_recursive(parent, generic_name, argument_count, visited)
+        self.find_type_generic_method_recursive(
+            parent,
+            generic_name,
+            argument_count,
+            active_keyword,
+            visited,
+        )
     }
 
     fn find_type_generic_method_recursive_for_args<'a>(
@@ -3422,6 +3457,7 @@ impl Workspace {
         ty: &'a Symbol,
         method_name: &str,
         argument_count: usize,
+        active_keyword: Option<&str>,
     ) -> Option<&'a Symbol> {
         let mut methods: Vec<(SymbolKey, &Symbol)> = Vec::new();
         for candidate in self.descendant_types(ty) {
@@ -3439,6 +3475,7 @@ impl Workspace {
                 candidate,
                 method_name,
                 argument_count,
+                active_keyword,
                 &mut visited,
             ) {
                 if !method.is_deferred {
@@ -3496,6 +3533,7 @@ impl Workspace {
         ty: &'a Symbol,
         generic_name: &str,
         argument_count: usize,
+        active_keyword: Option<&str>,
     ) -> Option<&'a Symbol> {
         let mut candidates = Vec::new();
         for generic in self.direct_type_generics(ty) {
@@ -3511,7 +3549,10 @@ impl Workspace {
         }
         candidates.iter().copied().find(|method| {
             self.method_target_symbol(method)
-                .map(|target| method_call_args(method, target).len() == argument_count)
+                .map(|target| {
+                    method_call_args(method, target).len() == argument_count
+                        && method_signature_matches_keyword(method, target, active_keyword)
+                })
                 .unwrap_or(false)
         })
     }
@@ -5913,6 +5954,27 @@ fn module_export_scope_matches(scope: &[String], module: &str) -> bool {
             || scope
                 .iter()
                 .any(|part| part.eq_ignore_ascii_case("interface")))
+}
+
+fn method_signature_matches_keyword(
+    method: &Symbol,
+    target: &Symbol,
+    active_keyword: Option<&str>,
+) -> bool {
+    active_keyword.is_none_or(|keyword| {
+        method_call_args(method, target)
+            .iter()
+            .any(|arg| parameter_label_name(arg).eq_ignore_ascii_case(keyword))
+    })
+}
+
+fn procedure_signature_matches_keyword(procedure: &Symbol, active_keyword: Option<&str>) -> bool {
+    active_keyword.is_none_or(|keyword| {
+        procedure
+            .args
+            .iter()
+            .any(|arg| parameter_label_name(arg).eq_ignore_ascii_case(keyword))
+    })
 }
 
 fn procedure_signature_label(sym: &Symbol) -> String {
