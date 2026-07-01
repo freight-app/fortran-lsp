@@ -3266,6 +3266,11 @@ impl Workspace {
         {
             return false;
         }
+        if prototype.kind == SymbolKind::Function
+            && !self.procedure_results_compatible(prototype, target)
+        {
+            return false;
+        }
         let pass_arg = passed_object_arg(method, target);
         prototype
             .args
@@ -3293,6 +3298,18 @@ impl Workspace {
             })
     }
 
+    fn procedure_results_compatible(&self, prototype: &Symbol, target: &Symbol) -> bool {
+        match (
+            self.procedure_result_symbol(prototype),
+            self.procedure_result_symbol(target),
+        ) {
+            (Some(prototype_result), Some(target_result)) => {
+                dummy_declarations_compatible(prototype_result, target_result)
+            }
+            _ => true,
+        }
+    }
+
     fn procedure_dummy_symbol<'a>(&'a self, procedure: &Symbol, arg: &str) -> Option<&'a Symbol> {
         let mut scope = procedure.scope.clone();
         scope.push(procedure.name.clone());
@@ -3301,6 +3318,17 @@ impl Workspace {
             .symbols
             .iter()
             .find(|sym| sym.name.eq_ignore_ascii_case(arg) && scopes_equal(&sym.scope, &scope))
+    }
+
+    fn procedure_result_symbol<'a>(&'a self, procedure: &Symbol) -> Option<&'a Symbol> {
+        let result = procedure.result.as_deref().unwrap_or(&procedure.name);
+        let mut scope = procedure.scope.clone();
+        scope.push(procedure.name.clone());
+        self.files
+            .get(&procedure.file)?
+            .symbols
+            .iter()
+            .find(|sym| sym.name.eq_ignore_ascii_case(result) && scopes_equal(&sym.scope, &scope))
     }
 
     fn passed_object_declarations_compatible(

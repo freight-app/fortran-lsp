@@ -4632,6 +4632,34 @@ end module";
 }
 
 #[test]
+fn reports_type_bound_function_interface_result_type_mismatch() {
+    let mut ws = Workspace::new();
+    let src = "module m\n\
+abstract interface\n\
+function area_iface(self) result(value)\n\
+class(*) :: self\n\
+real :: value\n\
+end function\n\
+end interface\n\
+type :: circle\n\
+contains\n\
+procedure(area_iface) :: area => circle_area\n\
+end type\n\
+contains\n\
+function circle_area(self) result(value)\n\
+class(circle) :: self\n\
+integer :: value\n\
+end function\n\
+end module";
+    ws.upsert_file(PathBuf::from("types.f90"), src);
+    let diagnostics = ws.diagnostics(Path::new("types.f90"));
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0]
+        .message
+        .contains("does not match interface `area_iface`"));
+}
+
+#[test]
 fn accepts_type_bound_procedure_matching_explicit_interface_attributes() {
     let mut ws = Workspace::new();
     let src = "module m\n\
