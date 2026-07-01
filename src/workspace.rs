@@ -1188,19 +1188,14 @@ impl Workspace {
                 continue;
             }
             for call in calls_on_line(line, line_no) {
-                let Some(params) = self.call_parameter_names(
-                    path,
-                    &call.name,
-                    call.receiver.as_deref(),
-                    call.args.len(),
-                ) else {
+                let Some(params) = self.call_parameters_for_line_call(path, &call) else {
                     continue;
                 };
                 for (idx, arg) in call.args.iter().enumerate() {
                     if idx >= params.len() || arg.keyword.is_some() {
                         continue;
                     }
-                    let label = format!("{}:", parameter_label_name(&params[idx]));
+                    let label = format!("{}:", parameter_label_name(&params[idx].label));
                     hints.push(InlayHint {
                         position: arg.start,
                         label,
@@ -1318,17 +1313,6 @@ impl Workspace {
                 .clone()
                 .or_else(|| target.documentation.clone()),
         })
-    }
-
-    fn call_parameter_names(
-        &self,
-        path: &Path,
-        name: &str,
-        receiver: Option<&str>,
-        argument_count: usize,
-    ) -> Option<Vec<String>> {
-        self.call_parameters(path, name, receiver, argument_count)
-            .map(|params| params.into_iter().map(|param| param.label).collect())
     }
 
     fn call_parameters(
@@ -1532,7 +1516,7 @@ impl Workspace {
             return static_method;
         }
         if declared_type_is_class(receiver_sym) {
-            if let Some(method) = self.find_unique_descendant_method(ty, member, args.len(), None) {
+            if let Some(method) = self.find_unique_descendant_method_for_args(ty, member, args) {
                 return Some(method);
             }
         }
@@ -3476,6 +3460,38 @@ impl Workspace {
                 method_name,
                 argument_count,
                 active_keyword,
+                &mut visited,
+            ) {
+                if !method.is_deferred {
+                    push_unique_method(&mut methods, method);
+                }
+            }
+        }
+        (methods.len() == 1).then(|| methods[0].1)
+    }
+
+    fn find_unique_descendant_method_for_args<'a>(
+        &'a self,
+        ty: &'a Symbol,
+        method_name: &str,
+        args: &[LineCallArg],
+    ) -> Option<&'a Symbol> {
+        let mut methods: Vec<(SymbolKey, &Symbol)> = Vec::new();
+        for candidate in self.descendant_types(ty) {
+            let mut visited = HashSet::new();
+            if let Some(method) =
+                self.find_type_method_recursive(candidate, method_name, &mut visited)
+            {
+                if !method.is_deferred {
+                    push_unique_method(&mut methods, method);
+                    continue;
+                }
+            }
+            let mut visited = HashSet::new();
+            if let Some(method) = self.find_type_generic_method_recursive_for_args(
+                candidate,
+                method_name,
+                args,
                 &mut visited,
             ) {
                 if !method.is_deferred {

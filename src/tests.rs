@@ -5002,6 +5002,62 @@ end program";
 }
 
 #[test]
+fn polymorphic_generic_descendant_uses_keyword_arguments_and_skips_ambiguous_hints() {
+    let mut ws = Workspace::new();
+    let types = "module m\n\
+type, abstract :: shape\n\
+contains\n\
+procedure(draw_iface), deferred :: draw\n\
+procedure(draw_width_iface), deferred :: draw_by_width\n\
+generic :: render => draw, draw_by_width\n\
+end type\n\
+type, extends(shape) :: circle\n\
+contains\n\
+procedure :: draw => draw_circle\n\
+procedure :: draw_by_width => draw_circle_by_width\n\
+end type\n\
+abstract interface\n\
+subroutine draw_iface(self, color)\n\
+class(*) :: self\n\
+integer :: color\n\
+end subroutine\n\
+subroutine draw_width_iface(self, width)\n\
+class(*) :: self\n\
+integer :: width\n\
+end subroutine\n\
+end interface\n\
+contains\n\
+subroutine draw_circle(self, color)\n\
+class(circle) :: self\n\
+integer :: color\n\
+end subroutine\n\
+subroutine draw_circle_by_width(self, width)\n\
+class(circle) :: self\n\
+integer :: width\n\
+end subroutine\n\
+end module";
+    let app = "program app\n\
+use m, only: shape\n\
+class(shape) :: item\n\
+call item%render(width=wide)\n\
+call item%render(wide)\n\
+end program";
+    ws.upsert_file(PathBuf::from("types.f90"), types);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let diagnostics = ws.diagnostics(Path::new("app.f90"));
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diag| !diag.message.contains("width")),
+        "{diagnostics:?}"
+    );
+
+    let hints = ws.inlay_hints(Path::new("app.f90"), 4, 4);
+    assert!(hints.is_empty(), "{hints:?}");
+}
+
+#[test]
 fn polymorphic_class_receiver_does_not_guess_ambiguous_descendant_override() {
     let mut ws = Workspace::new();
     let types = "module m\n\
