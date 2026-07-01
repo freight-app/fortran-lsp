@@ -2417,6 +2417,9 @@ fn eval_integer_expr(expr: &str, defs: &HashMap<String, String>) -> i64 {
 
 fn parse_preprocessor_integer(expr: &str) -> Option<i64> {
     let trimmed = expr.trim();
+    if let Some(value) = parse_preprocessor_char_literal(trimmed) {
+        return Some(value);
+    }
     let number = trimmed
         .trim_end_matches(|ch: char| matches!(ch, 'u' | 'U' | 'l' | 'L'))
         .replace('\'', "");
@@ -2430,6 +2433,25 @@ fn parse_preprocessor_integer(expr: &str) -> Option<i64> {
     } else {
         number.parse::<i64>().ok()
     }
+}
+
+fn parse_preprocessor_char_literal(expr: &str) -> Option<i64> {
+    let inner = expr.strip_prefix('\'')?.strip_suffix('\'')?;
+    let mut chars = inner.chars();
+    let ch = match chars.next()? {
+        '\\' => match chars.next()? {
+            '0' => '\0',
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            '\\' => '\\',
+            '\'' => '\'',
+            '"' => '"',
+            other => other,
+        },
+        ch => ch,
+    };
+    chars.next().is_none().then_some(ch as i64)
 }
 
 fn parse_defined(expr: &str) -> Option<&str> {

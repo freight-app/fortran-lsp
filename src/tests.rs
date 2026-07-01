@@ -5947,7 +5947,7 @@ fn unsupported_end_constructs_do_not_close_real_scopes() {
 fn preprocessor_conditionals_filter_inactive_symbols() {
     let parsed = ParsedFile::parse(
         "cond.F90",
-        "#define USE_FAST 1\n#define API_VERSION 3\n#define FLAGS 0x6u\nmodule m\n#ifdef USE_FAST\ninteger :: fast\n#else\ninteger :: slow\n#endif\n#if defined(USE_FAST) && USE_FAST == 1\ninteger :: guarded\n#endif\n#if API_VERSION >= 3 && API_VERSION < 4\ninteger :: versioned\n#else\ninteger :: old_version\n#endif\n#if ((FLAGS & 2) != 0) && (API_VERSION + 1 == 4) && (1 << 3) == 010 && (~0 != 0)\ninteger :: numeric_guard\n#else\ninteger :: numeric_fallback\n#endif\nend module",
+        "#define USE_FAST 1\n#define API_VERSION 3\n#define FLAGS 0x6u\nmodule m\n#ifdef USE_FAST\ninteger :: fast\n#else\ninteger :: slow\n#endif\n#if defined(USE_FAST) && USE_FAST == 1\ninteger :: guarded\n#endif\n#if API_VERSION >= 3 && API_VERSION < 4\ninteger :: versioned\n#else\ninteger :: old_version\n#endif\n#if ((FLAGS & 2) != 0) && (API_VERSION + 1 == 4) && (1 << 3) == 010 && (~0 != 0) && ('A' == 65) && ('\\n' == 10)\ninteger :: numeric_guard\n#else\ninteger :: numeric_fallback\n#endif\nend module",
     );
     let names: Vec<_> = parsed.symbols.iter().map(|sym| sym.name.as_str()).collect();
     assert!(names.contains(&"fast"));
