@@ -3306,7 +3306,13 @@ impl Workspace {
             (Some(prototype_result), Some(target_result)) => {
                 dummy_declarations_compatible(prototype_result, target_result)
             }
-            _ => true,
+            _ => match (
+                result_type_spec(self, prototype),
+                result_type_spec(self, target),
+            ) {
+                (Some(prototype_type), Some(target_type)) => prototype_type == target_type,
+                _ => true,
+            },
         }
     }
 
@@ -4703,10 +4709,53 @@ fn dummy_declarations_compatible(prototype: &Symbol, target: &Symbol) -> bool {
         && normalized_dummy_attrs(prototype) == normalized_dummy_attrs(target)
 }
 
+fn result_type_spec(workspace: &Workspace, procedure: &Symbol) -> Option<String> {
+    workspace
+        .procedure_result_symbol(procedure)
+        .and_then(optional_type_spec)
+        .or_else(|| function_header_result_type_spec(&procedure.signature))
+}
+
 fn optional_type_spec(sym: &Symbol) -> Option<String> {
     sym.type_spec
         .as_deref()
         .map(|type_spec| normalize_declaration_part(type_spec))
+}
+
+fn function_header_result_type_spec(signature: &str) -> Option<String> {
+    let signature = strip_procedure_prefixes_for_signature(signature);
+    let lower = signature.to_ascii_lowercase();
+    let idx = lower.find("function")?;
+    if idx == 0 {
+        return None;
+    }
+    let before = signature[..idx].trim();
+    let before = before
+        .to_ascii_lowercase()
+        .strip_suffix("module")
+        .map(|_| &before[..before.len().saturating_sub("module".len())])
+        .unwrap_or(before)
+        .trim();
+    (!before.is_empty()).then(|| normalize_declaration_part(before))
+}
+
+fn strip_procedure_prefixes_for_signature(mut signature: &str) -> &str {
+    loop {
+        let trimmed = signature.trim_start();
+        let Some(prefix) = trimmed
+            .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+            .find(|part| !part.is_empty())
+        else {
+            return trimmed;
+        };
+        if !matches!(
+            prefix.to_ascii_lowercase().as_str(),
+            "pure" | "impure" | "elemental" | "recursive"
+        ) {
+            return trimmed;
+        }
+        signature = &trimmed[prefix.len()..];
+    }
 }
 
 fn normalized_dummy_attrs(sym: &Symbol) -> Vec<String> {
