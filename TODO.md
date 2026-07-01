@@ -56,8 +56,8 @@ Next useful work:
 - [ ] Fuller C-preprocessor expression support. Implemented today:
       conditionals, `defined(...)`, `!`, `&&`, `||`, `==`, `!=`, numeric
       ordering comparisons, integer arithmetic, bitwise operators, shifts,
-      hex/octal literals, C integer suffixes, and object/function-like macro
-      expansion.
+      hex/octal literals, C integer suffixes, character constants, and
+      object/function-like macro expansion.
 - [ ] Broader polymorphic dispatch modelling when multiple runtime target types
       are possible.
 - [ ] Richer diagnostics for procedure/type interface compatibility.
