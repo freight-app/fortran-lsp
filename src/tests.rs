@@ -5223,6 +5223,22 @@ end program";
 }
 
 #[test]
+fn diagnostics_accept_typed_array_constructors() {
+    let mut ws = Workspace::new();
+    let src = "program app\n\
+integer, parameter :: rk = kind(1.0)\n\
+type point\n\
+integer :: x\n\
+end type\n\
+real(kind=rk) :: xs(2) = [real(kind=rk) :: 1, 2]\n\
+complex(kind=rk) :: zs(1) = [complex(kind=rk) :: (1, 0)]\n\
+type(point) :: pts(1) = [point(x=1) :: point(1)]\n\
+end program";
+    ws.upsert_file(PathBuf::from("constructors.f90"), src);
+    assert!(ws.diagnostics(Path::new("constructors.f90")).is_empty());
+}
+
+#[test]
 fn diagnostics_accept_merge_mask_keyword() {
     let mut ws = Workspace::new();
     let src = "program app\n\

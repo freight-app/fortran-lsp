@@ -2810,6 +2810,9 @@ impl Workspace {
                 continue;
             }
             for call in calls_on_line(line, line_no) {
+                if line_call_is_typed_array_constructor(line, &call) {
+                    continue;
+                }
                 let scope = file.scope_at(call.range().start);
                 if self.call_is_implicit_result_reference(file, &scope, &call.name) {
                     continue;
@@ -5129,6 +5132,12 @@ fn call_args_compatible_with_params(args: &[LineCallArg], params: &[CallParamete
         .iter()
         .enumerate()
         .all(|(idx, param)| param.optional || provided[idx])
+}
+
+fn line_call_is_typed_array_constructor(line: &str, call: &LineCall) -> bool {
+    let end = byte_idx_for_utf16_col(line, call.end.character);
+    line.get(end..)
+        .is_some_and(|rest| rest.trim_start().starts_with("::"))
 }
 
 fn calls_on_line(line: &str, line_no: usize) -> Vec<LineCall> {
