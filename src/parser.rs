@@ -2428,6 +2428,11 @@ fn parse_preprocessor_integer(expr: &str) -> Option<i64> {
         .or_else(|| number.strip_prefix("0X"))
     {
         i64::from_str_radix(hex, 16).ok()
+    } else if let Some(binary) = number
+        .strip_prefix("0b")
+        .or_else(|| number.strip_prefix("0B"))
+    {
+        i64::from_str_radix(binary, 2).ok()
     } else if number.len() > 1 && number.starts_with('0') {
         i64::from_str_radix(&number[1..], 8).ok()
     } else {
