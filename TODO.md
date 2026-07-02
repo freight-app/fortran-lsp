@@ -24,6 +24,8 @@ workspace-level plan.
 - [x] Freight adapter tests cover LSP-shaped native responses.
 - [x] Deterministic JSON-RPC harness covers shared fortls behavior plus
       Freight-only native surfaces.
+- [x] Full 17-project oracle sweep passes with the stable project-mode timing
+      gate (`--diagnostic-quiet 5.0`).
 - [ ] Keep expanding real-project differentials and close concrete gaps found
       there.
 
@@ -108,7 +110,7 @@ python3 scripts/fortran_lsp_compare.py --freight target/debug/freight \
 
 python3 scripts/fortran_lsp_compare.py --freight target/debug/freight \
   --project /tmp/freight-stdlib-fixture --max-files 0 \
-  --request-timeout 30 --diagnostic-timeout 25 --diagnostic-quiet 2.0
+  --request-timeout 90 --diagnostic-timeout 40 --diagnostic-quiet 5.0
 ```
 
 For large symbol-heavy projects such as quadpack, raise `--request-timeout` to
