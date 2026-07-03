@@ -26,6 +26,21 @@ workspace-level plan.
       Freight-only native surfaces.
 - [x] Full 17-project oracle sweep passes with the stable project-mode timing
       gate (`--diagnostic-quiet 5.0`).
+- [x] Workspace-wide indexing: `refresh_flags` walks project + dep include
+      roots and indexes every Fortran file (parallel parse via
+      `Workspace::upsert_parsed`), so a single opened file resolves sibling
+      modules; `didClose` restores disk state instead of un-indexing;
+      `workspace/didChangeWatchedFiles` refreshes unopened changed files.
+- [x] Build defines reach the preprocessor: manifest `[compiler]` +
+      default-feature defines seed `#ifdef` evaluation
+      (`Workspace::set_predefined_macros` / `ParsedFile::parse_with_defines`).
+- [x] Legacy constructs indexed: COMMON members (incl. blank COMMON), NAMELIST
+      group names, ENTRY points — via a deferred pass so explicit declarations
+      win (no duplicate false positives).
+- [x] Fixed-form comment cards skipped by call diagnostics / inlay hints
+      (netlib ODEPACK: 416 false errors → 0).
+- [x] Linear-time parse on large legacy files (`line_interface_state`
+      memoized; masking pass prefilters by name — 10k-line file 5.9s → 173ms).
 - [ ] Keep expanding real-project differentials and close concrete gaps found
       there.
 
@@ -59,17 +74,47 @@ Next useful work:
       conditionals, `defined(...)`, `!`, `&&`, `||`, `==`, `!=`, numeric
       ordering comparisons, integer arithmetic, bitwise operators, shifts,
       modulo, hex/octal/binary literals, C integer suffixes, character
-      constants, and object/function-like macro expansion.
+      constants, object/function-like macro expansion, and externally
+      predefined macros (the build's `-D` set).
 - [ ] Broader polymorphic dispatch modelling when multiple runtime target types
       are possible.
 - [ ] Richer diagnostics for procedure/type interface compatibility.
+- [ ] Remaining legacy constructs (COMMON members / NAMELIST groups / ENTRY are
+      done): COMMON **block names** as symbols (`/dls001/` is not queryable),
+      EQUIVALENCE, BLOCK DATA units, and statement functions.
+- [ ] Fixed-form **continuation cards in the call checker**: `calls_on_line`
+      sees one physical line, so a call spanning column-6 continuations is
+      only partially visible. Comment cards are now skipped; verify continued
+      calls neither false-positive nor go unchecked (ODEPACK produced no false
+      positives, but coverage of continued calls is untested).
+- [ ] Modern corners: `do concurrent` locality specs (`local(...)` /
+      `shared(...)` names are not scoped), coarray syntax (`codimension`,
+      `[*]`), parameterized derived types, and defined-I/O generics
+      (`write(formatted)`). fortls is also weak here — correctness items, not
+      parity items.
 
-### 3. Performance
+### 3. LSP Surface Gaps
+
+- [ ] Code action: **add `use` statement** for an unresolved name (the
+      highest-value Fortran quick fix; today the only action kind is
+      "implement deferred procedures").
+- [ ] Formatting provider: fortls delegates to findent/fprettify; freight has
+      no Fortran formatter path (`freight fmt` wraps clang-format). Decide
+      whether to shell out to fprettify when present or skip formatting.
+- [ ] Single-open-file differential mode in `fortran_lsp_compare.py`: project
+      mode opens every file in both servers, which structurally hides
+      workspace-indexing bugs (the false "module could not be resolved" class).
+      Add a mode that opens exactly one file and compares.
+
+### 4. Performance
 
 - [ ] Module symbol caching / incremental reparse.
       `Workspace::upsert_file` already skips unchanged source and avoids
       rebuilding indexes for no-op updates. Every real text change still
       reparses that file. Measure before adding partial reparse.
+      (The former O(n²) hotspot — `line_interface_state` rescanning the source
+      per query — is fixed by per-file memoization; the test suite dropped
+      25.5s → 0.8s.)
 
 ## Real-Project Oracle Fixtures
 
@@ -94,6 +139,15 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 | 15 | `jacobwilliams/fortran-search-and-sort` | `/tmp/freight-search-sort-fixture` | Passes without code changes; include-heavy sorting-module coverage. |
 | 16 | `jacobwilliams/quadpack` | `/tmp/freight-quadpack-fixture` | Passes; covered include-wrapper diagnostic boundaries and `MOD_INCLUDE` template normalization. |
 | 17 | `jacobwilliams/nlesolver-fortran` | `/tmp/freight-nlesolver-fixture` | Passes without code changes; compact nonlinear-solver and sparse-test coverage. |
+| 18 | `jacobwilliams/odepack` (`archive/src/*.f`) | `/tmp/freight-odepack-fixture` | Legacy netlib F77 (28k lines, COMMON/ENTRY/prologue comment cards). Driven directly (not via the fortls harness): 1115 symbols in `opkdmain.f`, zero false diagnostics after the fixed-form comment-card fix. Candidate for a proper harness run. |
+
+**Environment note (2026-07-03):** the system `python3` lost `json5`/`packaging`,
+so `python3 -m fortls` no longer runs. Use a venv (`pip install fortls`) or a
+wrapper around the `/tmp/fortls-reference` snapshot. The `stdlib` and `fpm`
+project-mode runs currently show small fortls-side masking-warning diffs that
+are **pre-existing** (A/B against a pre-change freight build produced
+byte-identical diffs) — likely fortls-version drift. Re-record those baselines
+with a pinned fortls version.
 
 ## Validation Commands
 
