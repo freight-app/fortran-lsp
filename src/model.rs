@@ -328,7 +328,19 @@ pub struct ParsedFile {
 
 impl ParsedFile {
     pub fn parse(path: impl Into<PathBuf>, source: &str) -> Self {
-        Parser::new(path.into(), source).parse()
+        Self::parse_with_defines(path, source, &[])
+    }
+
+    /// Parse with externally predefined preprocessor macros (the build
+    /// system's `-D NAME[=VALUE]` set), so `#ifdef` regions are evaluated the
+    /// way the real compilation would see them. A bare name uses the C
+    /// convention of defining it to `1`.
+    pub fn parse_with_defines(
+        path: impl Into<PathBuf>,
+        source: &str,
+        defines: &[(String, String)],
+    ) -> Self {
+        Parser::with_defines(path.into(), source, defines).parse()
     }
 
     pub fn symbol_at(&self, pos: Position) -> Option<&Symbol> {

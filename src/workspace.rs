@@ -9,8 +9,8 @@ use crate::model::{
     UseStmt, Visibility,
 };
 use crate::parser::{
-    call_context, identifier_occurrences, is_scope_kind, member_access_at_source, scope_match_len,
-    word_at_source, word_range_at_source,
+    call_context, identifier_occurrences, is_fixed_comment, is_fixed_form_path, is_scope_kind,
+    member_access_at_source, scope_match_len, word_at_source, word_range_at_source,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -19,6 +19,7 @@ pub struct Workspace {
     by_name: HashMap<String, Vec<(PathBuf, usize)>>,
     include_roots: Vec<PathBuf>,
     config: WorkspaceConfig,
+    predefined_macros: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -77,8 +78,45 @@ impl Workspace {
         {
             return false;
         }
+        self.upsert_parsed(ParsedFile::parse_with_defines(
+            path,
+            source,
+            &self.predefined_macros,
+        ));
+        true
+    }
 
-        let parsed = ParsedFile::parse(path, source);
+    /// Predefined preprocessor macros (the build's `-D NAME[=VALUE]` set) used
+    /// for every parse, so `#ifdef` regions match the real compilation. A
+    /// change reparses all indexed files. Callers parsing in parallel must
+    /// pass the same set to [`ParsedFile::parse_with_defines`].
+    pub fn set_predefined_macros(&mut self, macros: Vec<(String, String)>) {
+        if self.predefined_macros == macros {
+            return;
+        }
+        self.predefined_macros = macros;
+        let sources: Vec<(PathBuf, String)> = self
+            .files
+            .iter()
+            .map(|(path, file)| (path.clone(), file.source.clone()))
+            .collect();
+        for (path, source) in sources {
+            self.upsert_parsed(ParsedFile::parse_with_defines(
+                path,
+                &source,
+                &self.predefined_macros,
+            ));
+        }
+    }
+
+    pub fn predefined_macros(&self) -> &[(String, String)] {
+        &self.predefined_macros
+    }
+
+    /// Insert an already-parsed file, replacing any previous version.
+    /// `ParsedFile::parse` is pure, so callers indexing a whole workspace can
+    /// parse many files in parallel and insert the results sequentially here.
+    pub fn upsert_parsed(&mut self, parsed: ParsedFile) {
         self.remove_file(&parsed.path);
         let path = parsed.path.clone();
         for (idx, sym) in parsed.symbols.iter().enumerate() {
@@ -88,7 +126,6 @@ impl Workspace {
                 .push((path.clone(), idx));
         }
         self.files.insert(path, parsed);
-        true
     }
 
     pub fn set_include_roots<I, P>(&mut self, roots: I)
@@ -1183,8 +1220,12 @@ impl Workspace {
             return Vec::new();
         };
         let mut hints = Vec::new();
+        let fixed_form = is_fixed_form_path(path);
         for (line_no, line) in file.source.lines().enumerate() {
             if line_no < start_line || line_no > end_line {
+                continue;
+            }
+            if fixed_form && is_fixed_comment(line) {
                 continue;
             }
             for call in calls_on_line(line, line_no) {
@@ -2810,7 +2851,12 @@ impl Workspace {
 
     fn call_diagnostics(&self, file: &ParsedFile) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
+        let fixed_form = is_fixed_form_path(&file.path);
         for (line_no, line) in file.source.lines().enumerate() {
+            // Fixed-form comment cards (`C`/`*` in column 1) are not code.
+            if fixed_form && is_fixed_comment(line) {
+                continue;
+            }
             if is_procedure_definition_line(line) {
                 continue;
             }

@@ -26,6 +26,19 @@ by Freight.
   property-style parser tests.
 - Index modules, programs, submodules, subroutines, functions, interfaces,
   derived types, `use` statements, and basic variable declarations.
+- Index legacy constructs: `COMMON` block members and blank COMMON,
+  `NAMELIST` group names, and `ENTRY` points (as siblings of the enclosing
+  procedure) — without duplicate-symbol false positives when members are also
+  declared with explicit types.
+- Accept externally predefined preprocessor macros (a build system's `-D`
+  set) via `Workspace::set_predefined_macros` / `ParsedFile::parse_with_defines`,
+  so `#ifdef` regions match the real compilation; changing the set reparses
+  the workspace.
+- Skip fixed-form comment cards in call diagnostics and inlay hints, so
+  netlib-style prologues (`C  CALL DINTDY(,,,,,)`) produce no false errors.
+- Parse large legacy files in linear time (per-line interface state is
+  computed once; the parent-masking pass prefilters by name), and support
+  parallel whole-workspace parsing via `Workspace::upsert_parsed`.
 - Track submodule ancestor modules and link `module procedure` implementations
   to their ancestor module interface prototypes for hover and definition.
 - Treat unresolved submodule ancestors as partial-index state to avoid cascaded

@@ -17,6 +17,14 @@ pub(crate) struct Parser<'a> {
     explicit_visibility: HashMap<(Vec<String>, String), Visibility>,
     preprocessor_stack: Vec<PreprocessorFrame>,
     preprocessor_macros: HashMap<String, MacroDefinition>,
+    /// Symbols from legacy storage statements (`common`, `namelist`) that are
+    /// only added after the whole file is parsed, and only for names with no
+    /// other symbol in the same scope: legacy code redeclares COMMON members
+    /// with explicit types, and repeated NAMELIST statements extend one group.
+    pending_legacy_symbols: Vec<Symbol>,
+    /// Lazily-built per-line interface nesting states (see
+    /// [`Parser::line_interface_state`]).
+    interface_line_states: std::cell::OnceCell<Vec<Option<bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,11 +57,26 @@ enum MacroDefinition {
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn new(path: PathBuf, source: &'a str) -> Self {
+    /// A parser whose preprocessor starts with externally predefined object
+    /// macros (a build system's `-D` set). An empty value means the C
+    /// convention `1`.
+    pub(crate) fn with_defines(
+        path: PathBuf,
+        source: &'a str,
+        defines: &[(String, String)],
+    ) -> Self {
+        let mut preprocessor_macros = HashMap::new();
+        let mut preprocessor_definitions = HashMap::new();
+        for (name, value) in defines {
+            let value = if value.is_empty() { "1" } else { value };
+            preprocessor_macros.insert(name.clone(), MacroDefinition::Object(value.to_string()));
+            preprocessor_definitions.insert(name.clone(), value.to_string());
+        }
         Self {
             parsed: ParsedFile {
                 path: path.clone(),
                 source: source.to_string(),
+                preprocessor_definitions,
                 ..ParsedFile::default()
             },
             path,
@@ -63,12 +86,17 @@ impl<'a> Parser<'a> {
             default_visibility: HashMap::new(),
             explicit_visibility: HashMap::new(),
             preprocessor_stack: Vec::new(),
-            preprocessor_macros: HashMap::new(),
+            preprocessor_macros,
+            pending_legacy_symbols: Vec::new(),
+            interface_line_states: std::cell::OnceCell::new(),
         }
     }
 
     pub(crate) fn parse(mut self) -> ParsedFile {
-        for (line_no, raw_line) in logical_lines(&self.path, self.source) {
+        // The fold-stage preprocessor filter starts from the same predefined
+        // macro set the parser was seeded with.
+        let predefined = self.parsed.preprocessor_definitions.clone();
+        for (line_no, raw_line) in logical_lines(&self.path, self.source, &predefined) {
             let raw_code = raw_line.trim();
             if raw_code.is_empty() {
                 continue;
@@ -140,6 +168,7 @@ impl<'a> Parser<'a> {
             });
         }
         self.apply_symbol_visibility();
+        self.flush_pending_legacy_symbols();
         self.add_duplicate_diagnostics();
         self.add_parent_masking_diagnostics();
         self.add_use_after_implicit_diagnostics();
@@ -198,6 +227,18 @@ impl<'a> Parser<'a> {
         if !enumerators.is_empty() {
             self.record_variable_declarations(&enumerators);
             self.parsed.symbols.extend(enumerators);
+            return;
+        }
+        if let Some(entries) = self.parse_entry_statement(line_no, code) {
+            self.parsed.symbols.extend(entries);
+            return;
+        }
+        if let Some(pending) = parse_common(code, line_no, &self.path, &scope) {
+            self.pending_legacy_symbols.extend(pending);
+            return;
+        }
+        if let Some(pending) = parse_namelist(code, line_no, &self.path, &scope) {
+            self.pending_legacy_symbols.extend(pending);
             return;
         }
         if self.in_interface_scope() {
@@ -679,7 +720,8 @@ impl<'a> Parser<'a> {
         let Ok(source) = std::fs::read_to_string(&path) else {
             return;
         };
-        for (line_no, raw_line) in logical_lines(&path, &source) {
+        let known = self.parsed.preprocessor_definitions.clone();
+        for (line_no, raw_line) in logical_lines(&path, &source, &known) {
             let raw_code = raw_line.trim();
             let Some(directive) =
                 parse_preprocessor(raw_code, line_no, &path, &self.current_scope())
@@ -774,6 +816,62 @@ impl<'a> Parser<'a> {
         expanded
     }
 
+    /// `entry name[(args)]` inside a procedure defines an additional external
+    /// entry point — a sibling of the enclosing procedure, with its kind.
+    fn parse_entry_statement(&self, line: usize, code: &str) -> Option<Vec<Symbol>> {
+        let rest = after_keyword(code, "entry")?;
+        let enclosing = self.scopes.last()?;
+        if !matches!(
+            enclosing.kind,
+            SymbolKind::Function | SymbolKind::Subroutine
+        ) {
+            return None;
+        }
+        let name = first_ident(rest)?;
+        if !rest.trim_start().starts_with(name) {
+            return None;
+        }
+        let scope = self.current_scope();
+        let parent_scope = &scope[..scope.len() - 1];
+        let args = arg_list(rest).unwrap_or_default();
+        let signature = if args.is_empty() {
+            format!("entry {name}()")
+        } else {
+            format!("entry {name}({})", args.join(", "))
+        };
+        let mut sym = legacy_symbol(
+            name,
+            enclosing.kind,
+            code,
+            line,
+            &self.path,
+            parent_scope,
+            signature,
+        );
+        sym.args = args;
+        Some(vec![sym])
+    }
+
+    /// Add pending `common`/`namelist` symbols for names that got no other
+    /// symbol in the same scope (see `pending_legacy_symbols`).
+    fn flush_pending_legacy_symbols(&mut self) {
+        if self.pending_legacy_symbols.is_empty() {
+            return;
+        }
+        let mut seen: HashSet<(Vec<String>, String)> = self
+            .parsed
+            .symbols
+            .iter()
+            .map(|sym| (sym.scope.clone(), sym.name.to_ascii_lowercase()))
+            .collect();
+        for sym in std::mem::take(&mut self.pending_legacy_symbols) {
+            let key = (sym.scope.clone(), sym.name.to_ascii_lowercase());
+            if seen.insert(key) {
+                self.parsed.symbols.push(sym);
+            }
+        }
+    }
+
     fn add_duplicate_diagnostics(&mut self) {
         let mut seen: HashMap<(Vec<String>, String), Position> = HashMap::new();
         for sym in &self.parsed.symbols {
@@ -798,11 +896,34 @@ impl<'a> Parser<'a> {
     }
 
     fn add_parent_masking_diagnostics(&mut self) {
+        // Cheap prefilter: a variable can only mask something if another
+        // symbol anywhere shares its name, or a use-only list imports it —
+        // every expensive check below matches candidates by name. Skipping
+        // unique names avoids the O(symbols) ancestor scans, which are
+        // quadratic on large legacy files without this.
+        let mut name_counts: HashMap<String, usize> = HashMap::new();
+        for sym in &self.parsed.symbols {
+            *name_counts
+                .entry(sym.name.to_ascii_lowercase())
+                .or_default() += 1;
+        }
+        let use_only_names: HashSet<String> = self
+            .parsed
+            .uses
+            .iter()
+            .flat_map(|use_stmt| use_stmt.only.iter())
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        let may_mask = |sym: &Symbol| {
+            let name = sym.name.to_ascii_lowercase();
+            name_counts.get(&name).copied().unwrap_or(0) > 1 || use_only_names.contains(&name)
+        };
         let mut diagnostics: Vec<_> = self
             .parsed
             .symbols
             .iter()
             .filter(|sym| sym.kind == SymbolKind::Variable)
+            .filter(|sym| may_mask(sym))
             .filter(|sym| {
                 matches!(
                     self.scope_owner_kind(&sym.scope),
@@ -890,24 +1011,30 @@ impl<'a> Parser<'a> {
             .is_some_and(|is_abstract| is_abstract)
     }
 
+    /// Interface nesting state just before `line`: `Some(true)` inside an
+    /// abstract interface, `Some(false)` inside a plain one, `None` outside.
+    /// Computed once for the whole file — the masking pass queries this per
+    /// candidate, and rescanning the source each call was quadratic.
     fn line_interface_state(&self, line: usize) -> Option<bool> {
-        let mut interfaces = Vec::new();
-        for (idx, source_line) in self.source.lines().enumerate() {
-            if idx >= line {
-                return interfaces.last().copied();
+        let states = self.interface_line_states.get_or_init(|| {
+            let mut states = Vec::new();
+            let mut interfaces: Vec<bool> = Vec::new();
+            for source_line in self.source.lines() {
+                states.push(interfaces.last().copied());
+                let code = strip_inline_comment(source_line);
+                let code = code.trim();
+                let lower = code.to_ascii_lowercase();
+                if lower.starts_with("end interface") {
+                    interfaces.pop();
+                } else if lower.starts_with("abstract interface") {
+                    interfaces.push(true);
+                } else if lower.starts_with("interface") {
+                    interfaces.push(false);
+                }
             }
-            let code = strip_inline_comment(source_line);
-            let code = code.trim();
-            let lower = code.to_ascii_lowercase();
-            if lower.starts_with("end interface") {
-                interfaces.pop();
-            } else if lower.starts_with("abstract interface") {
-                interfaces.push(true);
-            } else if lower.starts_with("interface") {
-                interfaces.push(false);
-            }
-        }
-        None
+            states
+        });
+        states.get(line).copied().flatten()
     }
 
     fn parent_variable(&self, sym: &Symbol) -> Option<&Symbol> {
@@ -1161,12 +1288,15 @@ fn has_intent_attribute(sym: &Symbol) -> bool {
         .any(|attr| attr.to_ascii_lowercase().starts_with("intent"))
 }
 
-fn logical_lines(path: &Path, source: &str) -> Vec<(usize, String)> {
-    let physical_lines = filter_inactive_preprocessor_lines(expand_preprocessor_include_lines(
-        path,
-        source,
-        &mut HashSet::new(),
-    ));
+fn logical_lines(
+    path: &Path,
+    source: &str,
+    predefined: &HashMap<String, String>,
+) -> Vec<(usize, String)> {
+    let physical_lines = filter_inactive_preprocessor_lines(
+        expand_preprocessor_include_lines(path, source, &mut HashSet::new()),
+        predefined,
+    );
     if is_fixed_form_path(path) {
         fixed_logical_lines(physical_lines)
     } else {
@@ -1312,9 +1442,15 @@ fn resolve_include_path_from(from: &Path, include: &str) -> Option<PathBuf> {
         .filter(|candidate| candidate.exists())
 }
 
-fn filter_inactive_preprocessor_lines(lines: Vec<(usize, String)>) -> Vec<(usize, String)> {
+fn filter_inactive_preprocessor_lines(
+    lines: Vec<(usize, String)>,
+    predefined: &HashMap<String, String>,
+) -> Vec<(usize, String)> {
     let mut out = Vec::new();
-    let mut state = FoldPreprocessorState::default();
+    let mut state = FoldPreprocessorState {
+        definitions: predefined.clone(),
+        ..FoldPreprocessorState::default()
+    };
     for (idx, line) in lines {
         let trimmed = line.trim();
         if let Some(directive) = parse_preprocessor(trimmed, idx, Path::new("<fold>"), &[]) {
@@ -1421,7 +1557,7 @@ impl FoldPreprocessorState {
     }
 }
 
-fn is_fixed_form_path(path: &Path) -> bool {
+pub(crate) fn is_fixed_form_path(path: &Path) -> bool {
     if path_has_free_form_hint(path) {
         return false;
     }
@@ -1444,7 +1580,7 @@ fn path_has_free_form_hint(path: &Path) -> bool {
     })
 }
 
-fn is_fixed_comment(line: &str) -> bool {
+pub(crate) fn is_fixed_comment(line: &str) -> bool {
     line.as_bytes()
         .first()
         .is_some_and(|ch| matches!(*ch as char, 'c' | 'C' | '*' | '!'))
@@ -2656,6 +2792,140 @@ fn parse_variables(
         });
     }
     Some(symbols)
+}
+
+/// A bare symbol for legacy statement constructs (`entry`, `common`,
+/// `namelist`): name + location + signature, everything else defaulted.
+fn legacy_symbol(
+    name: &str,
+    kind: SymbolKind,
+    code: &str,
+    line: usize,
+    file: &Path,
+    scope: &[String],
+    signature: String,
+) -> Symbol {
+    let col = find_ci(code, name).unwrap_or(0);
+    let range = Range {
+        start: Position::new(line, col),
+        end: Position::new(line, col + name.len()),
+    };
+    Symbol {
+        name: name.to_string(),
+        kind,
+        file: file.to_path_buf(),
+        range: range.clone(),
+        selection_range: range,
+        scope: scope.to_vec(),
+        signature,
+        args: Vec::new(),
+        documentation: None,
+        visibility: Visibility::Default,
+        type_spec: None,
+        attributes: Vec::new(),
+        result: None,
+        is_parameter: false,
+        is_external: false,
+        extends: None,
+        is_abstract: false,
+        binding_target: None,
+        pass_arg: None,
+        is_deferred: false,
+        is_module_procedure: false,
+        ancestor: None,
+    }
+}
+
+/// `common [/blk/] a, b(10) [[,] /blk2/ c]` — every listed object is a
+/// variable of the enclosing scope. Returned as pending symbols: most legacy
+/// code also declares the members with explicit types, which must win.
+fn parse_common(code: &str, line: usize, file: &Path, scope: &[String]) -> Option<Vec<Symbol>> {
+    let rest = after_keyword(code, "common")?;
+    let mut symbols = Vec::new();
+    for (block, items) in split_slash_delimited_groups(rest) {
+        let block_label = block
+            .as_deref()
+            .filter(|b| !b.is_empty())
+            .map(|b| format!(" /{b}/"))
+            .unwrap_or_default();
+        for item in parse_decl_items(&items) {
+            symbols.push(legacy_symbol(
+                &item.name,
+                SymbolKind::Variable,
+                code,
+                line,
+                file,
+                scope,
+                format!("common{block_label} :: {}", item.name),
+            ));
+        }
+    }
+    (!symbols.is_empty()).then_some(symbols)
+}
+
+/// `namelist /group/ a, b [[,] /group2/ c]` — each group name becomes a
+/// symbol (the members are ordinary variables declared elsewhere). Pending:
+/// repeated NAMELIST statements legally extend the same group.
+fn parse_namelist(code: &str, line: usize, file: &Path, scope: &[String]) -> Option<Vec<Symbol>> {
+    let rest = after_keyword(code, "namelist")?;
+    let mut symbols = Vec::new();
+    for (block, _) in split_slash_delimited_groups(rest) {
+        if let Some(group) = block.as_deref().filter(|b| !b.is_empty()) {
+            symbols.push(legacy_symbol(
+                group,
+                SymbolKind::Variable,
+                code,
+                line,
+                file,
+                scope,
+                format!("namelist /{group}/"),
+            ));
+        }
+    }
+    (!symbols.is_empty()).then_some(symbols)
+}
+
+/// Split `[/name/] items [[,] /name2/ items]...` into `(block, items)` pairs.
+/// The leading block name is `None` for blank COMMON.
+fn split_slash_delimited_groups(rest: &str) -> Vec<(Option<String>, String)> {
+    let mut groups = Vec::new();
+    let mut current_block: Option<String> = None;
+    let mut current_items = String::new();
+    let mut chars = rest.char_indices().peekable();
+    let mut depth = 0usize;
+    while let Some((idx, ch)) = chars.next() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current_items.push(ch);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                current_items.push(ch);
+            }
+            '/' if depth == 0 => {
+                // Close the running group, then read the next block name.
+                if !current_items.trim().is_empty() || current_block.is_some() {
+                    groups.push((current_block.take(), std::mem::take(&mut current_items)));
+                }
+                let tail = &rest[idx + 1..];
+                let Some(end) = tail.find('/') else {
+                    return groups; // unbalanced — bail with what we have
+                };
+                current_block = Some(tail[..end].trim().to_string());
+                current_items.clear();
+                // Skip up to and including the closing '/'.
+                for _ in 0..=end {
+                    chars.next();
+                }
+            }
+            _ => current_items.push(ch),
+        }
+    }
+    if !current_items.trim().is_empty() || current_block.is_some() {
+        groups.push((current_block, current_items));
+    }
+    groups
 }
 
 fn parse_enumerators(code: &str, line: usize, file: &Path, scope: &[String]) -> Vec<Symbol> {

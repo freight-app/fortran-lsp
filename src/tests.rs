@@ -6003,6 +6003,132 @@ fn unsupported_end_constructs_do_not_close_real_scopes() {
 }
 
 #[test]
+fn fixed_form_comment_cards_are_not_call_sites() {
+    // Netlib-style prologue comments look like calls (`C  CALL DINTDY(,,,,,)`,
+    // `C***TYPE DOUBLE PRECISION (RUMACH-S, ...)`) — the call checker must
+    // skip fixed-form comment cards instead of diagnosing them.
+    let source = [
+        "      SUBROUTINE DINTDY (T, K, DKY)",
+        "      DOUBLE PRECISION T, DKY",
+        "      INTEGER K",
+        "      RETURN",
+        "      END",
+        "C***TYPE      DOUBLE PRECISION (SINTDY-S, DINTDY-D)",
+        "C     CALL DINTDY(,,,,,)   Provide derivatives of y",
+        "C           CALL DINTDY (T, K, RWORK(21), NYH, DKY, IFLAG)",
+        "      SUBROUTINE USER()",
+        "      DOUBLE PRECISION T, DKY",
+        "      CALL DINTDY (T, 0, DKY)",
+        "      END",
+        "",
+    ]
+    .join("\n");
+    let mut ws = Workspace::new();
+    ws.upsert_file("old.f", &source);
+    let diagnostics = ws.diagnostics(Path::new("old.f"));
+    assert!(
+        diagnostics.is_empty(),
+        "comment cards must not produce call diagnostics: {diagnostics:?}",
+    );
+}
+
+#[test]
+fn legacy_common_entry_namelist_are_indexed() {
+    // Fixed-form legacy: COMMON members and ENTRY points become symbols.
+    let parsed = ParsedFile::parse(
+        "old.f",
+        "      PROGRAM OLD\n      COMMON /BLK/ X, Y(10)\n      COMMON Z\n      END\n\
+         \n      REAL FUNCTION F(A)\n      F = A * 2.0\n      ENTRY G(A)\n      G = A * 3.0\n      END\n",
+    );
+    let names: Vec<String> = parsed
+        .symbols
+        .iter()
+        .map(|sym| sym.qualified_name())
+        .collect();
+    for expected in ["OLD::X", "OLD::Y", "OLD::Z", "F", "G"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "expected {expected} in {names:?}",
+        );
+    }
+    let g = parsed
+        .symbols
+        .iter()
+        .find(|sym| sym.name == "G")
+        .expect("ENTRY symbol");
+    assert_eq!(
+        g.kind,
+        SymbolKind::Function,
+        "ENTRY inherits enclosing kind"
+    );
+    assert!(
+        g.scope.is_empty(),
+        "ENTRY is a sibling of the enclosing procedure"
+    );
+
+    // COMMON members with an explicit declaration keep the declaration symbol —
+    // no duplicate-definition diagnostics.
+    let modern = ParsedFile::parse(
+        "mixed.f90",
+        "subroutine s()\n  real :: x\n  common /blk/ x, y\n  namelist /cfg/ x, y\n\
+         namelist /cfg/ y\nend subroutine",
+    );
+    assert!(
+        modern.diagnostics.is_empty(),
+        "no false positives from common/namelist: {:?}",
+        modern.diagnostics,
+    );
+    let count = |name: &str| {
+        modern
+            .symbols
+            .iter()
+            .filter(|sym| sym.name.eq_ignore_ascii_case(name))
+            .count()
+    };
+    assert_eq!(count("x"), 1, "declared member is not duplicated");
+    assert_eq!(count("y"), 1, "common-only member gets one symbol");
+    assert_eq!(count("cfg"), 1, "namelist group extension stays one symbol");
+}
+
+#[test]
+fn predefined_macros_drive_preprocessor_conditionals() {
+    let source = "module m\n#ifdef WITH_FAST\ninteger :: fast\n#else\ninteger :: slow\n#endif\n\
+                  #if API_LEVEL >= 3\ninteger :: modern\n#endif\nend module";
+    // Without the build defines: the #else branch and nothing else.
+    let bare = ParsedFile::parse("cond.F90", source);
+    let names: Vec<_> = bare.symbols.iter().map(|sym| sym.name.as_str()).collect();
+    assert!(names.contains(&"slow"));
+    assert!(!names.contains(&"fast"));
+    assert!(!names.contains(&"modern"));
+    // With the build's -D set: the #ifdef branch and the #if arithmetic hold.
+    let defines = vec![
+        ("WITH_FAST".to_string(), String::new()),
+        ("API_LEVEL".to_string(), "3".to_string()),
+    ];
+    let defined = ParsedFile::parse_with_defines("cond.F90", source, &defines);
+    let names: Vec<_> = defined
+        .symbols
+        .iter()
+        .map(|sym| sym.name.as_str())
+        .collect();
+    assert!(names.contains(&"fast"));
+    assert!(names.contains(&"modern"));
+    assert!(!names.contains(&"slow"));
+}
+
+#[test]
+fn workspace_predefined_macro_change_reparses_indexed_files() {
+    let mut ws = Workspace::new();
+    ws.upsert_file(
+        "guarded.F90",
+        "module m\n#ifdef WITH_FAST\ninteger :: fast\n#endif\nend module",
+    );
+    assert!(ws.workspace_symbols("fast").is_empty());
+    ws.set_predefined_macros(vec![("WITH_FAST".to_string(), String::new())]);
+    assert_eq!(ws.workspace_symbols("fast").len(), 1);
+}
+
+#[test]
 fn preprocessor_conditionals_filter_inactive_symbols() {
     let parsed = ParsedFile::parse(
         "cond.F90",
