@@ -79,32 +79,35 @@ Next useful work:
 - [ ] Broader polymorphic dispatch modelling when multiple runtime target types
       are possible.
 - [ ] Richer diagnostics for procedure/type interface compatibility.
-- [ ] Remaining legacy constructs (COMMON members / NAMELIST groups / ENTRY are
-      done): COMMON **block names** as symbols (`/dls001/` is not queryable),
-      EQUIVALENCE, BLOCK DATA units, and statement functions.
-- [ ] Fixed-form **continuation cards in the call checker**: `calls_on_line`
-      sees one physical line, so a call spanning column-6 continuations is
-      only partially visible. Comment cards are now skipped; verify continued
-      calls neither false-positive nor go unchecked (ODEPACK produced no false
-      positives, but coverage of continued calls is untested).
-- [ ] Modern corners: `do concurrent` locality specs (`local(...)` /
-      `shared(...)` names are not scoped), coarray syntax (`codimension`,
-      `[*]`), parameterized derived types, and defined-I/O generics
-      (`write(formatted)`). fortls is also weak here — correctness items, not
-      parity items.
+- [x] COMMON **block names** as symbols (`/setup/` is queryable) and
+      **BLOCK DATA** units (Program-kind scopes; `end block data` handled).
+      COMMON members / NAMELIST groups / ENTRY were already done.
+- [ ] **Skeletons ready in `tests.rs`** — each remaining construct has an
+      `#[ignore]`d test specifying the expected behavior (search for
+      `TODO(codex)`); remove the `#[ignore]`, run, implement until green:
+      - `equivalence_statements_are_tolerated_and_members_resolve`
+      - `statement_functions_get_local_function_symbols`
+      - `do_concurrent_locality_names_are_scoped`
+      - `coarray_declarations_are_tolerated`
+      - `parameterized_derived_types_resolve`
+      - `defined_io_generic_bindings_resolve`
+      - `continued_calls_are_argument_checked` (fixed-form continuation cards
+        make a call invisible to `calls_on_line`; fold continuations but keep
+        diagnostic ranges on the physical start line)
 
 ### 3. LSP Surface Gaps
 
-- [ ] Code action: **add `use` statement** for an unresolved name (the
-      highest-value Fortran quick fix; today the only action kind is
-      "implement deferred procedures").
-- [ ] Formatting provider: fortls delegates to findent/fprettify; freight has
-      no Fortran formatter path (`freight fmt` wraps clang-format). Decide
-      whether to shell out to fprettify when present or skip formatting.
-- [ ] Single-open-file differential mode in `fortran_lsp_compare.py`: project
-      mode opens every file in both servers, which structurally hides
-      workspace-indexing bugs (the false "module could not be resolved" class).
-      Add a mode that opens exactly one file and compares.
+- [x] Code action: **add `use <module>, only: <name>`** for an unresolvable
+      name that an indexed module exports (`Workspace::code_actions_at`;
+      inserts after the scope's last `use`, fixed-form aware).
+- [x] Formatting provider: `textDocument/formatting` shells out to
+      `fprettify` (stdin→stdout) for free-form Fortran when it is on PATH;
+      answers null otherwise; forwards non-Fortran to clangd. TODO(codex):
+      thread `[language.fortran]` style options through as fprettify flags.
+- [x] Single-open-file differential mode: `fortran_lsp_compare.py
+      --project <dir> --open-only <substring>` opens only matching files while
+      both servers index the whole tree — catches the workspace-indexing bug
+      class that all-files project mode structurally hides.
 
 ### 4. Performance
 

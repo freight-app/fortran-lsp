@@ -511,6 +511,10 @@ impl<'a> Parser<'a> {
     fn close_scope(&mut self, line: usize, lower: &str) {
         let target_kind = if lower == "end" {
             None
+        } else if lower.starts_with("end block data") || lower.starts_with("end blockdata") {
+            // A `block data` unit opens a Program-kind scope, and `end block
+            // data` must not be read as ending a `block` construct.
+            Some(SymbolKind::Program)
         } else {
             let Some(kind_word) = lower.split_whitespace().nth(1) else {
                 return;
@@ -1269,7 +1273,7 @@ fn use_after_implicit_line(frame: &ScopeFrame) -> Option<usize> {
     frame.use_after_implicit.then_some(frame.implicit_line?)
 }
 
-fn scopes_equal_case_insensitive(left: &[String], right: &[String]) -> bool {
+pub(crate) fn scopes_equal_case_insensitive(left: &[String], right: &[String]) -> bool {
     left.len() == right.len()
         && left
             .iter()
@@ -1839,6 +1843,26 @@ fn parse_construct_scope(code: &str) -> Option<ScopeStart> {
     let trimmed = code.trim();
     let construct = strip_construct_label(trimmed);
     let label = construct_label(trimmed);
+    // `block data [name]` is a program unit, not a `block` construct.
+    if let Some(rest) = after_keyword_words(construct, "block data") {
+        let name = first_ident(rest)
+            .map(str::to_string)
+            .unwrap_or_else(|| "block data".to_string());
+        return Some(ScopeStart {
+            kind: SymbolKind::Program,
+            selection: name.clone(),
+            name,
+            args: Vec::new(),
+            signature: trimmed.to_string(),
+            attributes: Vec::new(),
+            visibility: None,
+            extends: None,
+            is_abstract: false,
+            is_module_procedure: false,
+            ancestor: None,
+            associate_names: Vec::new(),
+        });
+    }
     if after_keyword(construct, "block").is_some() {
         return Some(construct_scope(
             SymbolKind::Block,
@@ -2843,6 +2867,20 @@ fn parse_common(code: &str, line: usize, file: &Path, scope: &[String]) -> Optio
     let rest = after_keyword(code, "common")?;
     let mut symbols = Vec::new();
     for (block, items) in split_slash_delimited_groups(rest) {
+        // The block name itself is queryable (hover/workspace-symbol on
+        // `/setup/`). COMMON names live in their own namespace, so this is
+        // pending too — an unrelated variable with the same name wins.
+        if let Some(name) = block.as_deref().filter(|b| !b.is_empty()) {
+            symbols.push(legacy_symbol(
+                name,
+                SymbolKind::Variable,
+                code,
+                line,
+                file,
+                scope,
+                format!("common /{name}/"),
+            ));
+        }
         let block_label = block
             .as_deref()
             .filter(|b| !b.is_empty())

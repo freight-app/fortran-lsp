@@ -10,7 +10,8 @@ use crate::model::{
 };
 use crate::parser::{
     call_context, identifier_occurrences, is_fixed_comment, is_fixed_form_path, is_scope_kind,
-    member_access_at_source, scope_match_len, word_at_source, word_range_at_source,
+    member_access_at_source, scope_match_len, scopes_equal_case_insensitive, word_at_source,
+    word_range_at_source,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -207,6 +208,111 @@ impl Workspace {
             .get(path)
             .map(|file| self.deferred_procedure_actions(file))
             .unwrap_or_default()
+    }
+
+    /// Position-aware code actions: everything from [`Self::code_actions`]
+    /// plus quick fixes for the symbol under the cursor (currently:
+    /// `add use <module>, only: <name>` for a name another module exports).
+    pub fn code_actions_at(&self, path: &Path, pos: Position, source: &str) -> Vec<CodeAction> {
+        let mut actions = self.code_actions(path);
+        actions.extend(self.add_use_actions(path, pos, source));
+        actions
+    }
+
+    /// Offer `use <module>, only: <name>` for an unresolvable name at `pos`
+    /// that some indexed module exports. The edit inserts after the last
+    /// existing `use` of the enclosing scope (or right after the scope
+    /// opener), before any `implicit` statement can be violated.
+    fn add_use_actions(&self, path: &Path, pos: Position, source: &str) -> Vec<CodeAction> {
+        let Some(word) = word_at_source(source, pos) else {
+            return Vec::new();
+        };
+        let Some(file) = self.files.get(path) else {
+            return Vec::new();
+        };
+        // Resolvable or intrinsic → nothing to fix.
+        if self.resolve_at(path, pos, &word).is_some()
+            || self.find_visible_intrinsic(path, &word).is_some()
+        {
+            return Vec::new();
+        }
+        let scope = file.scope_at(pos);
+        if scope.is_empty() {
+            return Vec::new();
+        }
+        let mut modules: Vec<String> = self
+            .files
+            .values()
+            .flat_map(|f| f.symbols.iter())
+            .filter(|sym| sym.kind == SymbolKind::Module && sym.scope.is_empty())
+            .filter(|module| !module.name.eq_ignore_ascii_case(&scope[0]))
+            .filter(|module| {
+                self.find_module_export_symbol(&module.name, &word)
+                    .is_some()
+            })
+            .map(|module| module.name.clone())
+            .collect();
+        modules.sort_by_key(|name| name.to_ascii_lowercase());
+        modules.dedup_by_key(|name| name.to_ascii_lowercase());
+
+        let Some((insert_line, indent)) = self.use_insertion_point(file, &scope) else {
+            return Vec::new();
+        };
+        modules
+            .into_iter()
+            .map(|module| CodeAction {
+                title: format!("Add `use {module}, only: {word}`"),
+                kind: "quickfix".to_string(),
+                edits: vec![TextEdit {
+                    file: path.to_path_buf(),
+                    range: Range {
+                        start: Position::new(insert_line, 0),
+                        end: Position::new(insert_line, 0),
+                    },
+                    new_text: format!("{indent}use {module}, only: {word}\n"),
+                }],
+            })
+            .collect()
+    }
+
+    /// Line to insert a new `use` statement at for `scope`, plus the
+    /// indentation to use: after the scope's last existing `use`, else right
+    /// after the scope opener line.
+    fn use_insertion_point(&self, file: &ParsedFile, scope: &[String]) -> Option<(usize, String)> {
+        let existing = file
+            .uses
+            .iter()
+            .filter(|use_stmt| scopes_equal_case_insensitive(&use_stmt.scope, scope))
+            .max_by_key(|use_stmt| use_stmt.range.start.line);
+        if let Some(use_stmt) = existing {
+            let line = use_stmt.range.start.line;
+            let indent: String = file
+                .source
+                .lines()
+                .nth(line)
+                .map(|l| l.chars().take_while(|c| c.is_whitespace()).collect())
+                .unwrap_or_default();
+            return Some((line + 1, indent));
+        }
+        let (name, parent) = scope.split_last()?;
+        let opener = file.symbols.iter().find(|sym| {
+            is_scope_kind(sym.kind)
+                && sym.name.eq_ignore_ascii_case(name)
+                && scopes_equal_case_insensitive(&sym.scope, parent)
+        })?;
+        let line = opener.range.start.line;
+        let indent = if crate::parser::is_fixed_form_path(&file.path) {
+            "      ".to_string()
+        } else {
+            let opener_indent: String = file
+                .source
+                .lines()
+                .nth(line)
+                .map(|l| l.chars().take_while(|c| c.is_whitespace()).collect())
+                .unwrap_or_default();
+            format!("{opener_indent}  ")
+        };
+        Some((line + 1, indent))
     }
 
     pub fn document_symbols(&self, path: &Path) -> Vec<DocumentSymbol> {
