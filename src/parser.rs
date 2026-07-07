@@ -237,6 +237,10 @@ impl<'a> Parser<'a> {
             self.pending_legacy_symbols.extend(pending);
             return;
         }
+        if let Some(pending) = parse_equivalence(code, line_no, &self.path, &scope) {
+            self.pending_legacy_symbols.extend(pending);
+            return;
+        }
         if let Some(pending) = parse_namelist(code, line_no, &self.path, &scope) {
             self.pending_legacy_symbols.extend(pending);
             return;
@@ -2899,6 +2903,58 @@ fn parse_common(code: &str, line: usize, file: &Path, scope: &[String]) -> Optio
         }
     }
     (!symbols.is_empty()).then_some(symbols)
+}
+
+/// `equivalence (a, b(1)) [, (c, d)]` — every listed object may be implicitly
+/// typed. Keep these pending so explicit declarations on nearby lines win.
+fn parse_equivalence(
+    code: &str,
+    line: usize,
+    file: &Path,
+    scope: &[String],
+) -> Option<Vec<Symbol>> {
+    let rest = after_keyword(code, "equivalence")?;
+    let mut symbols = Vec::new();
+    for group in parenthesized_groups(rest) {
+        for item in parse_decl_items(group) {
+            symbols.push(legacy_symbol(
+                &item.name,
+                SymbolKind::Variable,
+                code,
+                line,
+                file,
+                scope,
+                format!("equivalence :: {}", item.name),
+            ));
+        }
+    }
+    (!symbols.is_empty()).then_some(symbols)
+}
+
+fn parenthesized_groups(s: &str) -> Vec<&str> {
+    let mut groups = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    for (idx, ch) in s.char_indices() {
+        match ch {
+            '(' => {
+                if depth == 0 {
+                    start = Some(idx + ch.len_utf8());
+                }
+                depth += 1;
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    if let Some(start_idx) = start.take() {
+                        groups.push(&s[start_idx..idx]);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    groups
 }
 
 /// `namelist /group/ a, b [[,] /group2/ c]` — each group name becomes a

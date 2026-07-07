@@ -6114,7 +6114,6 @@ fn block_data_units_and_common_block_names_are_indexed() {
 /// the aliased `a`. This test only pins the no-false-positives floor plus
 /// symbol existence for the declared variables.
 #[test]
-#[ignore = "EQUIVALENCE not modeled yet"]
 fn equivalence_statements_are_tolerated_and_members_resolve() {
     let source = [
         "      SUBROUTINE S()",
