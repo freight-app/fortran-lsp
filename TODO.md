@@ -84,10 +84,11 @@ Next useful work:
       COMMON members / NAMELIST groups / ENTRY were already done.
 - [x] EQUIVALENCE statements tolerate storage association and create pending
       implicit symbols for undeclared associated names.
+- [x] Statement functions (`f(x) = ...` in the specification part) become
+      local Function symbols by upgrading their type declarations when present.
 - [ ] **Skeletons ready in `tests.rs`** — each remaining construct has an
       `#[ignore]`d test specifying the expected behavior (search for
       `TODO(codex)`); remove the `#[ignore]`, run, implement until green:
-      - `statement_functions_get_local_function_symbols`
       - `do_concurrent_locality_names_are_scoped`
       - `coarray_declarations_are_tolerated`
       - `parameterized_derived_types_resolve`

@@ -6136,7 +6136,6 @@ fn equivalence_statements_are_tolerated_and_members_resolve() {
 /// scope. Today the line is treated as an assignment (no symbol). Signature
 /// help / hover on `f` should show `f(x)`.
 #[test]
-#[ignore = "statement functions not modeled yet"]
 fn statement_functions_get_local_function_symbols() {
     let source = [
         "      REAL FUNCTION G(Y)",

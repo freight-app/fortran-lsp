@@ -38,6 +38,7 @@ struct ScopeFrame {
     use_after_implicit: bool,
     contains_line: Option<usize>,
     declared_variables: HashSet<String>,
+    seen_executable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -257,12 +258,74 @@ impl<'a> Parser<'a> {
             self.open_scope(line_no, start);
             return;
         }
+        if self.parse_statement_function(line_no, code) {
+            return;
+        }
         let in_type_binding_part = self.in_type_binding_part();
         if let Some(vars) = parse_variables(code, line_no, &self.path, &scope, in_type_binding_part)
         {
             self.record_variable_declarations(&vars);
             self.parsed.symbols.extend(vars);
+            return;
         }
+        self.mark_executable_statement();
+    }
+
+    fn mark_executable_statement(&mut self) {
+        if let Some(frame) = self.scopes.last_mut() {
+            frame.seen_executable = true;
+        }
+    }
+
+    fn parse_statement_function(&mut self, line: usize, code: &str) -> bool {
+        let Some(frame) = self.scopes.last() else {
+            return false;
+        };
+        if frame.seen_executable
+            || !matches!(
+                frame.kind,
+                SymbolKind::Program | SymbolKind::Subroutine | SymbolKind::Function
+            )
+        {
+            return false;
+        }
+        let Some((name, args)) = parse_statement_function_lhs(code) else {
+            return false;
+        };
+        let scope = self.current_scope();
+        let col = find_ci(code, &name).unwrap_or(0);
+        let range = Range {
+            start: Position::new(line, col),
+            end: Position::new(line, col + name.len()),
+        };
+        if let Some(sym) = self.parsed.symbols.iter_mut().find(|sym| {
+            sym.kind == SymbolKind::Variable
+                && sym.name.eq_ignore_ascii_case(&name)
+                && sym.scope == scope
+                && !sym
+                    .attributes
+                    .iter()
+                    .any(|attr| attr.eq_ignore_ascii_case("dimension"))
+        }) {
+            sym.kind = SymbolKind::Function;
+            sym.args = args;
+            sym.signature = code.trim().to_string();
+            sym.range = range.clone();
+            sym.selection_range = range;
+        } else {
+            let mut sym = legacy_symbol(
+                &name,
+                SymbolKind::Function,
+                code,
+                line,
+                &self.path,
+                &scope,
+                code.trim().to_string(),
+            );
+            sym.args = args;
+            self.parsed.symbols.push(sym);
+        }
+        true
     }
 
     fn open_scope(&mut self, line: usize, start: ScopeStart) {
@@ -367,6 +430,7 @@ impl<'a> Parser<'a> {
             use_after_implicit: false,
             contains_line: None,
             declared_variables: HashSet::new(),
+            seen_executable: false,
         });
     }
 
@@ -2806,7 +2870,7 @@ fn parse_variables(
             documentation: None,
             visibility: decl.visibility.unwrap_or(Visibility::Default),
             type_spec: Some(decl.type_spec.clone()),
-            attributes: decl.attributes.clone(),
+            attributes: declaration_attributes(&decl, &item),
             result: None,
             is_parameter: decl.has_attribute("parameter"),
             is_external: decl.has_attribute("external") || decl.type_keyword == "external",
@@ -3198,6 +3262,7 @@ fn parse_result_name(signature: &str) -> Option<String> {
 struct DeclItem {
     name: String,
     binding_target: Option<String>,
+    has_shape: bool,
 }
 
 fn parse_decl_items(rhs: &str) -> Vec<DeclItem> {
@@ -3210,12 +3275,60 @@ fn parse_decl_items(rhs: &str) -> Vec<DeclItem> {
             } else {
                 (item.as_str(), None)
             };
+            let has_shape = name_part
+                .trim_start()
+                .get(first_ident(name_part)?.len()..)
+                .is_some_and(|rest| rest.trim_start().starts_with('('));
             Some(DeclItem {
                 name: first_ident(name_part)?.to_string(),
                 binding_target,
+                has_shape,
             })
         })
         .collect()
+}
+
+fn parse_statement_function_lhs(code: &str) -> Option<(String, Vec<String>)> {
+    let (lhs, _) = split_top_level_once(code, "=")?;
+    let lhs = lhs.trim();
+    let name = first_ident(lhs)?;
+    let name_start = lhs.find(name)?;
+    if !lhs[..name_start]
+        .trim()
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    let rest = lhs[name_start + name.len()..].trim_start();
+    if !rest.starts_with('(') {
+        return None;
+    }
+    let close = matching_paren_index(rest, 0)?;
+    if !rest[close + 1..].trim().is_empty() {
+        return None;
+    }
+    let args = split_names(&rest[1..close]);
+    if args
+        .iter()
+        .all(|arg| first_ident(arg).is_some_and(|ident| ident == arg))
+    {
+        Some((name.to_string(), args))
+    } else {
+        None
+    }
+}
+
+fn declaration_attributes(decl: &DeclarationLhs, item: &DeclItem) -> Vec<String> {
+    let mut attributes = decl.attributes.clone();
+    if item.has_shape
+        && !attributes
+            .iter()
+            .any(|attr| attr.eq_ignore_ascii_case("dimension"))
+    {
+        attributes.push("dimension".to_string());
+    }
+    attributes
 }
 
 fn paren_content(s: &str) -> Option<&str> {
