@@ -4776,6 +4776,34 @@ end module";
 }
 
 #[test]
+fn reports_type_bound_procedure_interface_characteristic_mismatch() {
+    let mut ws = Workspace::new();
+    let src = "module m\n\
+abstract interface\n\
+pure subroutine draw_iface(self, color)\n\
+class(*) :: self\n\
+integer, intent(in) :: color\n\
+end subroutine\n\
+end interface\n\
+type :: circle\n\
+contains\n\
+procedure(draw_iface) :: draw => draw_circle\n\
+end type\n\
+contains\n\
+subroutine draw_circle(self, color)\n\
+class(circle) :: self\n\
+integer, intent(in) :: color\n\
+end subroutine\n\
+end module";
+    ws.upsert_file(PathBuf::from("types.f90"), src);
+    let diagnostics = ws.diagnostics(Path::new("types.f90"));
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0]
+        .message
+        .contains("does not match interface `draw_iface`"));
+}
+
+#[test]
 fn reports_generic_bindings_that_reference_unknown_methods() {
     let mut ws = Workspace::new();
     let src = "module m\n\

@@ -3422,6 +3422,9 @@ impl Workspace {
         if prototype.kind != target.kind || prototype.args.len() != target.args.len() {
             return false;
         }
+        if !procedure_required_characteristics_compatible(prototype, target) {
+            return false;
+        }
         if !prototype
             .args
             .iter()
@@ -4898,6 +4901,32 @@ fn procedure_interface_name(type_spec: &str) -> Option<&str> {
 fn dummy_declarations_compatible(prototype: &Symbol, target: &Symbol) -> bool {
     optional_type_spec(prototype) == optional_type_spec(target)
         && normalized_dummy_attrs(prototype) == normalized_dummy_attrs(target)
+}
+
+fn procedure_required_characteristics_compatible(prototype: &Symbol, target: &Symbol) -> bool {
+    let target_characteristics = procedure_characteristics(&target.signature);
+    procedure_characteristics(&prototype.signature)
+        .into_iter()
+        .all(|required| {
+            target_characteristics
+                .iter()
+                .any(|actual| actual == &required)
+        })
+}
+
+fn procedure_characteristics(signature: &str) -> Vec<&'static str> {
+    let mut characteristics = Vec::new();
+    let mut rest = signature.trim_start();
+    while let Some(token) = first_ident_local(rest) {
+        match token.to_ascii_lowercase().as_str() {
+            "pure" => characteristics.push("pure"),
+            "elemental" => characteristics.push("elemental"),
+            "module" | "recursive" | "impure" => {}
+            _ => break,
+        }
+        rest = rest[token.len()..].trim_start();
+    }
+    characteristics
 }
 
 fn result_type_spec(workspace: &Workspace, procedure: &Symbol) -> Option<String> {

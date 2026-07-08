@@ -1725,6 +1725,7 @@ fn implicit_program_start(path: &Path, code: &str) -> ScopeStart {
 }
 
 fn parse_scope_start(code: &str) -> Option<ScopeStart> {
+    let signature = code.trim().to_string();
     let code = strip_procedure_prefixes(code);
     let lower = code.to_ascii_lowercase();
     if let Some(rest) = after_keyword_words(code, "module procedure") {
@@ -1754,7 +1755,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
             selection: name.clone(),
             name,
             args: arg_list(rest).unwrap_or_default(),
-            signature: code.trim().to_string(),
+            signature: signature.clone(),
             attributes: Vec::new(),
             visibility: None,
             extends: None,
@@ -1771,7 +1772,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
             selection: name.clone(),
             name,
             args: arg_list(rest).unwrap_or_default(),
-            signature: code.trim().to_string(),
+            signature: signature.clone(),
             attributes: Vec::new(),
             visibility: None,
             extends: None,
@@ -1788,7 +1789,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
             selection: name.clone(),
             name,
             args: arg_list(rest).unwrap_or_default(),
-            signature: code.trim().to_string(),
+            signature: signature.clone(),
             attributes: Vec::new(),
             visibility: None,
             extends: None,
@@ -1805,7 +1806,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
             selection: name.clone(),
             name,
             args: arg_list(rest).unwrap_or_default(),
-            signature: code.trim().to_string(),
+            signature: signature.clone(),
             attributes: Vec::new(),
             visibility: None,
             extends: None,
@@ -1839,7 +1840,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
                 name: name.to_string(),
                 selection: name.to_string(),
                 args,
-                signature: code.trim().to_string(),
+                signature: signature.clone(),
                 attributes: Vec::new(),
                 visibility: None,
                 extends: None,
@@ -1857,7 +1858,7 @@ fn parse_scope_start(code: &str) -> Option<ScopeStart> {
             selection: type_info.name.clone(),
             name: type_info.name,
             args: Vec::new(),
-            signature: code.trim().to_string(),
+            signature: signature.clone(),
             attributes: type_info.attributes,
             visibility: type_info.visibility,
             extends: type_info.extends,

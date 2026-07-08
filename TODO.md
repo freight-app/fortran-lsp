@@ -84,7 +84,10 @@ Next useful work:
       abstract interface for definition/signature/diagnostics instead of
       guessing a descendant; deferred generic overloads still suppress
       misleading positional hints unless the candidate is unique.
-- [ ] Richer diagnostics for procedure/type interface compatibility.
+- [x] Richer diagnostics for procedure/type interface compatibility: explicit
+      type-bound procedure interfaces now compare required procedure
+      characteristics (`pure`, `elemental`) in addition to kind, arguments,
+      dummy declarations, result declarations, and passed-object compatibility.
 - [x] COMMON **block names** as symbols (`/setup/` is queryable) and
       **BLOCK DATA** units (Program-kind scopes; `end block data` handled).
       COMMON members / NAMELIST groups / ENTRY were already done.
