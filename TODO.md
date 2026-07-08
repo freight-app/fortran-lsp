@@ -90,10 +90,11 @@ Next useful work:
       regression.
 - [x] Coarray declarations and basic image-control statements are covered by a
       live no-false-diagnostics regression.
+- [x] Parameterized derived type declarations/usages are covered by a live
+      no-false-diagnostics regression.
 - [ ] **Skeletons ready in `tests.rs`** — each remaining construct has an
       `#[ignore]`d test specifying the expected behavior (search for
       `TODO(codex)`); remove the `#[ignore]`, run, implement until green:
-      - `parameterized_derived_types_resolve`
       - `defined_io_generic_bindings_resolve`
       - `continued_calls_are_argument_checked` (fixed-form continuation cards
         make a call invisible to `calls_on_line`; fold continuations but keep

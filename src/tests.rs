@@ -6193,7 +6193,6 @@ fn coarray_declarations_are_tolerated() {
 /// `kind`/`len` type parameters. Floor: the type + components get symbols and
 /// `type(t(4, 10)) :: v` declarations resolve; no false diagnostics.
 #[test]
-#[ignore = "parameterized derived types not modeled yet"]
 fn parameterized_derived_types_resolve() {
     let source = "module m\n  type :: matrix(k, n)\n    integer, kind :: k\n\
                   integer, len :: n\n    real(k) :: data(n, n)\n  end type\n\
