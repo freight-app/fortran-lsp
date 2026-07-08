@@ -1794,6 +1794,15 @@ end module",
 }
 
 #[test]
+fn external_statement_declares_procedure_dummy() {
+    let parsed = ParsedFile::parse(
+        "external_dummy.f90",
+        "subroutine s(f)\nimplicit none\nexternal f\nend subroutine",
+    );
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+}
+
+#[test]
 fn implicit_typing_allows_undeclared_arguments() {
     let parsed = ParsedFile::parse("implicit_args.f90", "subroutine allowed(a)\nend subroutine");
     assert!(!parsed.diagnostics.iter().any(|diag| {
@@ -3443,6 +3452,19 @@ fn records_include_statements() {
         .collect();
     assert_eq!(paths, vec!["params.inc", "defs.inc"]);
     assert_eq!(parsed.includes[0].scope, vec!["m"]);
+}
+
+#[test]
+fn top_level_include_after_module_does_not_open_implicit_program() {
+    let parsed = ParsedFile::parse(
+        "module_with_tail_includes.f90",
+        "module m\nend module\ninclude \"tail.inc\"",
+    );
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert!(!parsed
+        .symbols
+        .iter()
+        .any(|sym| sym.kind == SymbolKind::Program));
 }
 
 #[test]
@@ -6102,6 +6124,30 @@ fn block_data_units_and_common_block_names_are_indexed() {
         );
     }
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+}
+
+#[test]
+fn common_block_names_do_not_mask_parent_common_blocks() {
+    let parsed = ParsedFile::parse(
+        "common_blocks.f90",
+        "program p\n\
+real :: a\n\
+common /pcom0/ a\n\
+contains\n\
+subroutine s()\n\
+real :: a\n\
+common /pcom0/ a\n\
+end subroutine\n\
+end program",
+    );
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diag| !diag.message.contains("pcom0")),
+        "{:?}",
+        parsed.diagnostics
+    );
 }
 
 // ── Fortls-port regressions ──────────────────────────────────────────────────

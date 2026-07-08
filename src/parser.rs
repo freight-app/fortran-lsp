@@ -189,6 +189,7 @@ impl<'a> Parser<'a> {
         if self.scopes.is_empty()
             && !is_include_fragment_path(&self.path)
             && parse_scope_start(code).is_none()
+            && parse_include(code, line_no, &self.path, &[]).is_none()
             && lower != "contains"
         {
             self.open_scope(line_no, implicit_program_start(&self.path, code));
@@ -1002,6 +1003,7 @@ impl<'a> Parser<'a> {
             .symbols
             .iter()
             .filter(|sym| sym.kind == SymbolKind::Variable)
+            .filter(|sym| !is_common_block_symbol(sym))
             .filter(|sym| may_mask(sym))
             .filter(|sym| {
                 matches!(
@@ -1338,6 +1340,10 @@ fn is_module_procedure_link_symbol(sym: &Symbol) -> bool {
             .signature
             .get(..sym.signature.len().min("module procedure".len()))
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("module procedure"))
+}
+
+fn is_common_block_symbol(sym: &Symbol) -> bool {
+    sym.signature.starts_with("common /") && sym.signature.ends_with('/')
 }
 
 fn type_member_mask_candidate(sym: &Symbol) -> bool {
@@ -3175,7 +3181,15 @@ fn split_legacy_declaration(code: &str) -> Option<(&str, &str)> {
     let keyword = first_ident(trimmed)?.to_ascii_lowercase();
     if !matches!(
         keyword.as_str(),
-        "integer" | "real" | "double" | "complex" | "character" | "logical" | "type" | "class"
+        "integer"
+            | "real"
+            | "double"
+            | "complex"
+            | "character"
+            | "logical"
+            | "type"
+            | "class"
+            | "external"
     ) {
         return None;
     }
