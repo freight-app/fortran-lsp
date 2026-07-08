@@ -147,7 +147,7 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 | 15 | `jacobwilliams/fortran-search-and-sort` | `/tmp/freight-search-sort-fixture` | Passes without code changes; include-heavy sorting-module coverage. |
 | 16 | `jacobwilliams/quadpack` | `/tmp/freight-quadpack-fixture` | Passes; covered include-wrapper diagnostic boundaries and `MOD_INCLUDE` template normalization. |
 | 17 | `jacobwilliams/nlesolver-fortran` | `/tmp/freight-nlesolver-fixture` | Passes without code changes; compact nonlinear-solver and sparse-test coverage. |
-| 18 | `jacobwilliams/odepack` | `/tmp/freight-odepack-fixture` | Project-mode harness run: Freight has zero diagnostics on the legacy demo `.f` files after implicit unnamed-main support; exact differential still fails because fortls emits duplicate/masking/unexpected-end noise there. `archive/src/opkdmain.f` remains clean in Freight (1115 symbols in direct smoke). |
+| 18 | `jacobwilliams/odepack` | `/tmp/freight-odepack-fixture` | Project-mode harness run: Freight has zero diagnostics on the legacy demo `.f` files after implicit unnamed-main support; exact differential still fails because fortls emits duplicate/masking/unexpected-end noise there. `archive/src/opkdmain.f` remains clean in Freight (1115 symbols in direct smoke). Follow-up fixed array-element assignments being misread as statement functions, clearing Freight-only `lsoda`/`lsodar`/`lsode`/`lsodkr` example diagnostics. |
 
 **Environment note (2026-07-03):** the system `python3` lost `json5`/`packaging`,
 so `python3 -m fortls` no longer runs. Use a venv (`pip install fortls`) or a

@@ -6152,6 +6152,24 @@ fn statement_functions_get_local_function_symbols() {
     assert_eq!(f.args, vec!["X"]);
 }
 
+#[test]
+fn array_element_assignments_are_not_statement_functions() {
+    let source = "subroutine f(n, ydot, pd)\n\
+integer :: n\n\
+real, dimension(n) :: ydot\n\
+real, dimension(n, n) :: pd\n\
+ydot(1) = 0.0\n\
+pd(1,1) = 1.0\n\
+end subroutine";
+    let parsed = ParsedFile::parse("arrays.f90", source);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert!(!parsed
+        .symbols
+        .iter()
+        .any(|sym| matches!(sym.kind, SymbolKind::Function)
+            && (sym.name == "ydot" || sym.name == "pd")));
+}
+
 /// `do concurrent` locality specs — names in `local(...)` / `local_init(...)`
 /// / `shared(...)` must not trigger false parent-masking diagnostics.
 #[test]

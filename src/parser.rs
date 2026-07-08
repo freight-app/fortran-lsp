@@ -3344,11 +3344,15 @@ fn parse_statement_function_lhs(code: &str) -> Option<(String, Vec<String>)> {
     if !rest[close + 1..].trim().is_empty() {
         return None;
     }
-    let args = split_names(&rest[1..close]);
-    if args
+    let raw_args = split_top_level_commas(&rest[1..close]);
+    if raw_args
         .iter()
-        .all(|arg| first_ident(arg).is_some_and(|ident| ident == arg))
+        .all(|arg| first_ident(arg.trim()).is_some_and(|ident| ident == arg.trim()))
     {
+        let args = raw_args
+            .into_iter()
+            .map(|arg| arg.trim().to_string())
+            .collect();
         Some((name.to_string(), args))
     } else {
         None
