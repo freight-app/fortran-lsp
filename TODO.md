@@ -123,10 +123,12 @@ Next useful work:
 
 ### 4. Performance
 
-- [ ] Module symbol caching / incremental reparse.
+- [x] Module symbol caching / incremental reparse.
       `Workspace::upsert_file` already skips unchanged source and avoids
-      rebuilding indexes for no-op updates. Every real text change still
-      reparses that file. Measure before adding partial reparse.
+      rebuilding indexes for no-op updates. Body/comment-only text changes still
+      reparse that file, but `Workspace::upsert_parsed` now caches the per-file
+      symbol index and skips rebuilding the global name index when the parsed
+      symbols are unchanged. Measure again before adding partial reparse.
       (The former O(n²) hotspot — `line_interface_state` rescanning the source
       per query — is fixed by per-file memoization; the test suite dropped
       25.5s → 0.8s.)

@@ -187,6 +187,22 @@ fn workspace_upsert_skips_unchanged_source() {
 }
 
 #[test]
+fn workspace_upsert_preserves_symbol_index_for_body_only_changes() {
+    let mut ws = Workspace::new();
+    let path = PathBuf::from("math.f90");
+    let first = "module math\ncontains\nsubroutine axpy()\n! first body note\nend subroutine\nend module";
+    let second = "module math\ncontains\nsubroutine axpy()\n! second body note\nend subroutine\nend module";
+
+    assert!(ws.upsert_file(path.clone(), first));
+    assert!(ws.upsert_file(path.clone(), second));
+    assert_eq!(ws.file(&path).unwrap().source, second);
+
+    let matches = ws.workspace_symbols("axpy");
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].qualified_name(), "math::axpy");
+}
+
+#[test]
 fn line_length_diagnostics_follow_fortls_limits() {
     let mut ws = Workspace::new();
     ws.set_line_length_limits(Some(12), Some(10));

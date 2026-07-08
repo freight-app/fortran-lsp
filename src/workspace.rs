@@ -18,6 +18,7 @@ use crate::parser::{
 pub struct Workspace {
     files: HashMap<PathBuf, ParsedFile>,
     by_name: HashMap<String, Vec<(PathBuf, usize)>>,
+    file_symbol_index: HashMap<PathBuf, Vec<(String, usize)>>,
     include_roots: Vec<PathBuf>,
     config: WorkspaceConfig,
     predefined_macros: Vec<(String, String)>,
@@ -50,6 +51,14 @@ impl SymbolKey {
             kind: sym.kind,
         }
     }
+}
+
+fn symbol_index(file: &ParsedFile) -> Vec<(String, usize)> {
+    file.symbols
+        .iter()
+        .enumerate()
+        .map(|(idx, sym)| (sym.name.to_ascii_lowercase(), idx))
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -118,14 +127,24 @@ impl Workspace {
     /// `ParsedFile::parse` is pure, so callers indexing a whole workspace can
     /// parse many files in parallel and insert the results sequentially here.
     pub fn upsert_parsed(&mut self, parsed: ParsedFile) {
-        self.remove_file(&parsed.path);
         let path = parsed.path.clone();
-        for (idx, sym) in parsed.symbols.iter().enumerate() {
-            self.by_name
-                .entry(sym.name.to_ascii_lowercase())
-                .or_default()
-                .push((path.clone(), idx));
+        let next_index = symbol_index(&parsed);
+        if self
+            .file_symbol_index
+            .get(&path)
+            .is_some_and(|old| old == &next_index)
+        {
+            self.files.insert(path, parsed);
+            return;
         }
+        self.remove_file(&path);
+        for (name, idx) in &next_index {
+            self.by_name
+                .entry(name.clone())
+                .or_default()
+                .push((path.clone(), *idx));
+        }
+        self.file_symbol_index.insert(path.clone(), next_index);
         self.files.insert(path, parsed);
     }
 
@@ -159,9 +178,10 @@ impl Workspace {
     }
 
     pub fn remove_file(&mut self, path: &Path) {
-        if let Some(old) = self.files.remove(path) {
-            for sym in old.symbols {
-                if let Some(entries) = self.by_name.get_mut(&sym.name.to_ascii_lowercase()) {
+        self.files.remove(path);
+        if let Some(old_index) = self.file_symbol_index.remove(path) {
+            for (name, _) in old_index {
+                if let Some(entries) = self.by_name.get_mut(&name) {
                     entries.retain(|(p, _)| p != path);
                 }
             }
