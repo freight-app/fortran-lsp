@@ -5220,8 +5220,69 @@ end program";
     let definition = ws
         .definition(Path::new("app.f90"), Position::new(3, 14), app)
         .unwrap();
-    assert_eq!(definition.name, "draw");
-    assert_eq!(definition.kind, SymbolKind::Method);
+    assert_eq!(definition.name, "draw_iface");
+    assert_eq!(definition.kind, SymbolKind::Subroutine);
+}
+
+#[test]
+fn polymorphic_ambiguous_descendants_use_static_deferred_interface() {
+    let mut ws = Workspace::new();
+    let types = "module m\n\
+type, abstract :: shape\n\
+contains\n\
+procedure(draw_iface), deferred :: draw\n\
+end type\n\
+type, extends(shape) :: circle\n\
+contains\n\
+procedure :: draw => draw_circle\n\
+end type\n\
+type, extends(shape) :: square\n\
+contains\n\
+procedure :: draw => draw_square\n\
+end type\n\
+abstract interface\n\
+subroutine draw_iface(self, color, width)\n\
+class(*) :: self\n\
+integer :: color\n\
+integer, optional :: width\n\
+end subroutine\n\
+end interface\n\
+contains\n\
+subroutine draw_circle(self, color, width)\n\
+class(circle) :: self\n\
+integer :: color\n\
+integer, optional :: width\n\
+end subroutine\n\
+subroutine draw_square(self, color, width)\n\
+class(square) :: self\n\
+integer :: color\n\
+integer, optional :: width\n\
+end subroutine\n\
+end module";
+    let app = "program app\n\
+use m, only: shape\n\
+class(shape) :: item\n\
+call item%draw(color=red)\n\
+call item%draw(shade=red)\n\
+end program";
+    ws.upsert_file(PathBuf::from("types.f90"), types);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let definition = ws
+        .definition(Path::new("app.f90"), Position::new(3, 14), app)
+        .unwrap();
+    assert_eq!(definition.name, "draw_iface");
+    assert_eq!(definition.kind, SymbolKind::Subroutine);
+
+    let sig = ws
+        .signature_help(Path::new("app.f90"), Position::new(3, 21), app)
+        .unwrap();
+    assert_eq!(sig.label, "draw(color, width)");
+    assert_eq!(sig.parameters, vec!["color", "width"]);
+
+    let diagnostics = ws.diagnostics(Path::new("app.f90"));
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("no argument named `shade`"));
 }
 
 #[test]

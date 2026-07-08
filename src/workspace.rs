@@ -3241,6 +3241,7 @@ impl Workspace {
         let parent_scope = method.scope.get(..method.scope.len().saturating_sub(1))?;
         self.find_procedure_in_scope(parent_scope, target)
             .or_else(|| self.find_procedure_in_host_interfaces(parent_scope, target))
+            .or_else(|| self.method_interface_prototype(method))
     }
 
     fn method_interface_prototype<'a>(&'a self, method: &'a Symbol) -> Option<&'a Symbol> {
@@ -3760,14 +3761,12 @@ impl Workspace {
                 }
             }
         }
-        candidates.iter().copied().find(|method| {
-            self.method_target_symbol(method)
-                .map(|target| {
-                    method_call_args(method, target).len() == argument_count
-                        && method_signature_matches_keyword(method, target, active_keyword)
-                })
-                .unwrap_or(false)
-        })
+        select_generic_method(candidates.into_iter().filter(|method| {
+            self.method_target_symbol(method).is_some_and(|target| {
+                method_call_args(method, target).len() == argument_count
+                    && method_signature_matches_keyword(method, target, active_keyword)
+            })
+        }))
     }
 
     fn file_uses_module_type_export(
@@ -4067,32 +4066,28 @@ impl Workspace {
                 }
             }
         }
-        candidates
-            .iter()
-            .copied()
-            .find(|method| {
+        select_generic_method(candidates.iter().copied().filter(|method| {
+            self.method_target_symbol(method).is_some_and(|target| {
+                let call_args = method_call_args(method, target);
+                let params = self.procedure_call_parameters(target, &call_args);
+                call_args.len() == args.len() && call_args_compatible_with_params(args, &params)
+            })
+        }))
+        .or_else(|| {
+            select_generic_method(candidates.iter().copied().filter(|method| {
                 self.method_target_symbol(method).is_some_and(|target| {
                     let call_args = method_call_args(method, target);
                     let params = self.procedure_call_parameters(target, &call_args);
-                    call_args.len() == args.len() && call_args_compatible_with_params(args, &params)
+                    call_args_compatible_with_params(args, &params)
                 })
-            })
-            .or_else(|| {
-                candidates.iter().copied().find(|method| {
-                    self.method_target_symbol(method).is_some_and(|target| {
-                        let call_args = method_call_args(method, target);
-                        let params = self.procedure_call_parameters(target, &call_args);
-                        call_args_compatible_with_params(args, &params)
-                    })
-                })
-            })
-            .or_else(|| {
-                candidates.iter().copied().find(|method| {
-                    self.method_target_symbol(method)
-                        .map(|target| method_call_args(method, target).len() == args.len())
-                        .unwrap_or(false)
-                })
-            })
+            }))
+        })
+        .or_else(|| {
+            select_generic_method(candidates.iter().copied().filter(|method| {
+                self.method_target_symbol(method)
+                    .is_some_and(|target| method_call_args(method, target).len() == args.len())
+            }))
+        })
     }
 
     fn module_unresolved_use_may_provide_export(&self, module: &Symbol, name: &str) -> bool {
@@ -4683,6 +4678,17 @@ fn push_unique_method<'a>(methods: &mut Vec<(SymbolKey, &'a Symbol)>, method: &'
     if !methods.iter().any(|(existing, _)| existing == &key) {
         methods.push((key, method));
     }
+}
+
+fn select_generic_method<'a>(methods: impl Iterator<Item = &'a Symbol>) -> Option<&'a Symbol> {
+    let mut unique = Vec::new();
+    for method in methods {
+        push_unique_method(&mut unique, method);
+    }
+    if unique.iter().any(|(_, method)| method.is_deferred) {
+        return (unique.len() == 1).then(|| unique[0].1);
+    }
+    unique.first().map(|(_, method)| *method)
 }
 
 fn declared_type_name(sym: &Symbol) -> Option<&str> {

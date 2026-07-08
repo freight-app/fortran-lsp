@@ -79,8 +79,11 @@ Next useful work:
       constants, ternary `?:`, object/function-like macro expansion including
       calls from `#if` / `#elif`, and externally predefined macros (the build's
       `-D` set).
-- [ ] Broader polymorphic dispatch modelling when multiple runtime target types
-      are possible.
+- [x] Broader polymorphic dispatch modelling when multiple runtime target types
+      are possible: ambiguous concrete overrides now resolve to the declared
+      abstract interface for definition/signature/diagnostics instead of
+      guessing a descendant; deferred generic overloads still suppress
+      misleading positional hints unless the candidate is unique.
 - [ ] Richer diagnostics for procedure/type interface compatibility.
 - [x] COMMON **block names** as symbols (`/setup/` is queryable) and
       **BLOCK DATA** units (Program-kind scopes; `end block data` handled).
