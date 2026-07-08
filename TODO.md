@@ -72,12 +72,13 @@ Next useful work:
 
 ### 2. Parser / Model Gaps
 
-- [ ] Fuller C-preprocessor expression support. Implemented today:
+- [x] Fuller C-preprocessor expression support. Implemented today:
       conditionals, `defined(...)`, `!`, `&&`, `||`, `==`, `!=`, numeric
       ordering comparisons, integer arithmetic, bitwise operators, shifts,
       modulo, hex/octal/binary literals, C integer suffixes, character
-      constants, object/function-like macro expansion, and externally
-      predefined macros (the build's `-D` set).
+      constants, ternary `?:`, object/function-like macro expansion including
+      calls from `#if` / `#elif`, and externally predefined macros (the build's
+      `-D` set).
 - [ ] Broader polymorphic dispatch modelling when multiple runtime target types
       are possible.
 - [ ] Richer diagnostics for procedure/type interface compatibility.

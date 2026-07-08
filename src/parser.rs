@@ -867,7 +867,8 @@ impl<'a> Parser<'a> {
     fn eval_preprocessor_directive(&self, directive: &PreprocessorDirective) -> bool {
         match directive.kind {
             PreprocessorKind::If => directive.argument.as_deref().is_some_and(|expr| {
-                eval_preprocessor_expr(expr, &self.parsed.preprocessor_definitions)
+                let expr = expand_function_like_macros(expr, &self.preprocessor_macros);
+                eval_preprocessor_expr(&expr, &self.parsed.preprocessor_definitions)
             }),
             PreprocessorKind::Ifdef => directive
                 .name
@@ -878,7 +879,8 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .is_some_and(|name| !self.parsed.preprocessor_definitions.contains_key(name)),
             PreprocessorKind::Elif => directive.argument.as_deref().is_some_and(|expr| {
-                eval_preprocessor_expr(expr, &self.parsed.preprocessor_definitions)
+                let expr = expand_function_like_macros(expr, &self.preprocessor_macros);
+                eval_preprocessor_expr(&expr, &self.parsed.preprocessor_definitions)
             }),
             _ => false,
         }
@@ -1552,6 +1554,7 @@ fn filter_inactive_preprocessor_lines(
 struct FoldPreprocessorState {
     stack: Vec<FoldPreprocessorFrame>,
     definitions: HashMap<String, String>,
+    macros: HashMap<String, MacroDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -1572,10 +1575,10 @@ impl FoldPreprocessorState {
             PreprocessorKind::If | PreprocessorKind::Ifdef | PreprocessorKind::Ifndef => {
                 let parent_active = self.active();
                 let condition = match directive.kind {
-                    PreprocessorKind::If => directive
-                        .argument
-                        .as_deref()
-                        .is_some_and(|expr| eval_preprocessor_expr(expr, &self.definitions)),
+                    PreprocessorKind::If => directive.argument.as_deref().is_some_and(|expr| {
+                        let expr = expand_function_like_macros(expr, &self.macros);
+                        eval_preprocessor_expr(&expr, &self.definitions)
+                    }),
                     PreprocessorKind::Ifdef => directive
                         .name
                         .as_ref()
@@ -1598,10 +1601,10 @@ impl FoldPreprocessorState {
                 let Some(frame) = self.stack.last_mut() else {
                     return;
                 };
-                let condition = directive
-                    .argument
-                    .as_deref()
-                    .is_some_and(|expr| eval_preprocessor_expr(expr, &self.definitions));
+                let condition = directive.argument.as_deref().is_some_and(|expr| {
+                    let expr = expand_function_like_macros(expr, &self.macros);
+                    eval_preprocessor_expr(&expr, &self.definitions)
+                });
                 frame.branch_active =
                     frame.parent_active && !frame.saw_else && !frame.any_taken && condition;
                 frame.any_taken |= frame.branch_active;
@@ -1627,6 +1630,10 @@ impl FoldPreprocessorState {
                                 .clone()
                                 .unwrap_or_else(|| "1".to_string()),
                         );
+                        self.macros.insert(
+                            name.clone(),
+                            macro_definition(directive.argument.as_deref()),
+                        );
                     }
                 }
             }
@@ -1634,6 +1641,7 @@ impl FoldPreprocessorState {
                 if self.active() {
                     if let Some(name) = &directive.name {
                         self.definitions.remove(name);
+                        self.macros.remove(name);
                     }
                 }
             }
@@ -2514,6 +2522,37 @@ fn expand_macro_once(line: &str, macros: &HashMap<String, MacroDefinition>) -> S
     out
 }
 
+fn expand_function_like_macros(line: &str, macros: &HashMap<String, MacroDefinition>) -> String {
+    let mut out = String::new();
+    let mut idx = 0usize;
+    while idx < line.len() {
+        let rest = &line[idx..];
+        let Some((name_start, name)) = next_identifier(rest) else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..name_start]);
+        let absolute_name_start = idx + name_start;
+        let name_end = absolute_name_start + name.len();
+        if let Some(MacroDefinition::Function { params, body }) = macros.get(name) {
+            let after_name = &line[name_end..];
+            let leading_ws = after_name.len() - after_name.trim_start().len();
+            let call_start = name_end + leading_ws;
+            if line[call_start..].starts_with('(') {
+                if let Some(close) = matching_paren_index(line, call_start) {
+                    let args = split_top_level_commas(&line[call_start + 1..close]);
+                    out.push_str(&expand_function_macro(params, body, &args));
+                    idx = close + 1;
+                    continue;
+                }
+            }
+        }
+        out.push_str(name);
+        idx = name_end;
+    }
+    out
+}
+
 fn expand_function_macro(params: &[String], body: &str, args: &[String]) -> String {
     let mut expanded = body.to_string();
     for (param, arg) in params.iter().zip(args.iter()) {
@@ -2622,6 +2661,13 @@ fn eval_atom_bool(expr: &str, defs: &HashMap<String, String>) -> bool {
 
 fn eval_atom_value(expr: &str, defs: &HashMap<String, String>) -> i64 {
     let expr = strip_outer_parens(expr.trim());
+    if let Some((condition, if_true, if_false)) = split_top_level_conditional(expr) {
+        return if eval_preprocessor_expr(condition, defs) {
+            eval_atom_value(if_true, defs)
+        } else {
+            eval_atom_value(if_false, defs)
+        };
+    }
     if let Some(name) = parse_defined(expr) {
         return i64::from(defs.contains_key(name));
     }
@@ -2841,6 +2887,38 @@ fn split_top_level_once<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str
             None
         }
     })
+}
+
+fn split_top_level_conditional(expr: &str) -> Option<(&str, &str, &str)> {
+    let mut depth = 0usize;
+    let mut question = None;
+    let mut nested = 0usize;
+    for (idx, ch) in expr.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '?' if depth == 0 => {
+                if question.is_some() {
+                    nested += 1;
+                } else {
+                    question = Some(idx);
+                }
+            }
+            ':' if depth == 0 => {
+                let question = question?;
+                if nested == 0 {
+                    return Some((
+                        expr[..question].trim(),
+                        expr[question + 1..idx].trim(),
+                        expr[idx + 1..].trim(),
+                    ));
+                }
+                nested -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parens_balanced(expr: &str) -> bool {

@@ -6406,16 +6406,20 @@ fn workspace_predefined_macro_change_reparses_indexed_files() {
 fn preprocessor_conditionals_filter_inactive_symbols() {
     let parsed = ParsedFile::parse(
         "cond.F90",
-        "#define USE_FAST 1\n#define API_VERSION 3\n#define FLAGS 0x6u\nmodule m\n#ifdef USE_FAST\ninteger :: fast\n#else\ninteger :: slow\n#endif\n#if defined(USE_FAST) && USE_FAST == 1\ninteger :: guarded\n#endif\n#if API_VERSION >= 3 && API_VERSION < 4\ninteger :: versioned\n#else\ninteger :: old_version\n#endif\n#if ((FLAGS & 2) != 0) && (API_VERSION + 1 == 4) && (1 << 3) == 010 && (~0 != 0) && ('A' == 65) && ('\\n' == 10) && (0b1010 % 4 == 2)\ninteger :: numeric_guard\n#else\ninteger :: numeric_fallback\n#endif\nend module",
+        "#define USE_FAST 1\n#define API_VERSION 3\n#define FLAGS 0x6u\n#define HAS_API(v) ((v) >= 3)\nmodule m\n#ifdef USE_FAST\ninteger :: fast\n#else\ninteger :: slow\n#endif\n#if defined(USE_FAST) && USE_FAST == 1\ninteger :: guarded\n#endif\n#if API_VERSION >= 3 && API_VERSION < 4\ninteger :: versioned\n#else\ninteger :: old_version\n#endif\n#if ((FLAGS & 2) != 0) && (API_VERSION + 1 == 4) && (1 << 3) == 010 && (~0 != 0) && ('A' == 65) && ('\\n' == 10) && (0b1010 % 4 == 2)\ninteger :: numeric_guard\n#else\ninteger :: numeric_fallback\n#endif\n#if (USE_FAST ? API_VERSION : 0) == 3\ninteger :: ternary_guard\n#else\ninteger :: ternary_fallback\n#endif\n#if HAS_API(API_VERSION)\ninteger :: function_macro_guard\n#else\ninteger :: function_macro_fallback\n#endif\nend module",
     );
     let names: Vec<_> = parsed.symbols.iter().map(|sym| sym.name.as_str()).collect();
     assert!(names.contains(&"fast"));
     assert!(names.contains(&"guarded"));
     assert!(names.contains(&"versioned"));
     assert!(names.contains(&"numeric_guard"));
+    assert!(names.contains(&"ternary_guard"));
+    assert!(names.contains(&"function_macro_guard"));
     assert!(!names.contains(&"slow"));
     assert!(!names.contains(&"old_version"));
     assert!(!names.contains(&"numeric_fallback"));
+    assert!(!names.contains(&"ternary_fallback"));
+    assert!(!names.contains(&"function_macro_fallback"));
 }
 
 #[test]
