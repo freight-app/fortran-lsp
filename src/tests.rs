@@ -6210,7 +6210,6 @@ fn parameterized_derived_types_resolve() {
 /// the interface form) binds a user-defined I/O routine. Floor: parsed as a
 /// generic binding without diagnostics; the bound procedure resolves.
 #[test]
-#[ignore = "defined-I/O generics not modeled yet"]
 fn defined_io_generic_bindings_resolve() {
     let source = "module m\n  type :: t\n  contains\n\
                   generic :: write(formatted) => write_t\n\
