@@ -42,9 +42,8 @@ workspace-level plan.
 - [x] Linear-time parse on large legacy files (`line_interface_state`
       memoized; masking pass prefilters by name — 10k-line file 5.9s → 173ms).
 - [ ] Keep expanding real-project differentials and close concrete gaps found
-      there. ODEPACK project-mode now proves Freight is clean on the legacy
-      demo files; exact equality is blocked by fortls-only duplicate/masking
-      noise in those same files.
+      there. ODEPACK is now a project-mode fixture with documented fortls-only
+      legacy-demo noise filtered by the harness.
 
 ## Open Work
 
@@ -147,7 +146,7 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 | 15 | `jacobwilliams/fortran-search-and-sort` | `/tmp/freight-search-sort-fixture` | Passes without code changes; include-heavy sorting-module coverage. |
 | 16 | `jacobwilliams/quadpack` | `/tmp/freight-quadpack-fixture` | Passes; covered include-wrapper diagnostic boundaries and `MOD_INCLUDE` template normalization. |
 | 17 | `jacobwilliams/nlesolver-fortran` | `/tmp/freight-nlesolver-fixture` | Passes without code changes; compact nonlinear-solver and sparse-test coverage. |
-| 18 | `jacobwilliams/odepack` | `/tmp/freight-odepack-fixture` | Project-mode harness run: Freight has zero diagnostics on the legacy demo `.f` files after implicit unnamed-main support; exact differential still fails because fortls emits duplicate/masking/unexpected-end noise there. `archive/src/opkdmain.f` remains clean in Freight (1115 symbols in direct smoke). Follow-up fixed array-element assignments being misread as statement functions, clearing Freight-only `lsoda`/`lsodar`/`lsode`/`lsodkr` example diagnostics. |
+| 18 | `jacobwilliams/odepack` | `/tmp/freight-odepack-fixture` | Passes project-mode harness with documented fortls-only legacy-demo noise filtered. Covered implicit unnamed main programs, top-level include tails after modules, legacy `external f` dummy declarations, statement-function vs array-element assignment disambiguation, and COMMON block names without false parent-masking. `archive/src/opkdmain.f` remains clean in Freight (1115 symbols in direct smoke). |
 
 **Environment note (2026-07-03):** the system `python3` lost `json5`/`packaging`,
 so `python3 -m fortls` no longer runs. Use a venv (`pip install fortls`) or a
