@@ -6161,7 +6161,6 @@ fn statement_functions_get_local_function_symbols() {
 /// `local_init(...)` / `shared(...)` are construct-local variables; they
 /// currently get no symbols, so references/rename inside the loop miss them.
 #[test]
-#[ignore = "do-concurrent locality specs not scoped yet"]
 fn do_concurrent_locality_names_are_scoped() {
     let source = "subroutine s()\n  integer :: i\n  real :: total\n\
                   do concurrent (i = 1:10) local(total)\n    total = total + i\n\
