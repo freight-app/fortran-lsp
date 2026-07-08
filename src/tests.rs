@@ -6179,7 +6179,6 @@ fn do_concurrent_locality_names_are_scoped() {
 /// image-control statements (`sync all`, `sync images`, `event post`). Floor:
 /// no false diagnostics; full: the codimension shows in hover/signature.
 #[test]
-#[ignore = "coarray declarations not modeled yet"]
 fn coarray_declarations_are_tolerated() {
     let source = "module m\n  real :: field(10)[*]\n  integer, codimension[*] :: counter\n\
                   contains\n  subroutine step()\n    sync all\n    field(1)[1] = 0.0\n\

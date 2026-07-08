@@ -88,10 +88,11 @@ Next useful work:
       local Function symbols by upgrading their type declarations when present.
 - [x] `do concurrent` locality specs are covered by a live no-false-masking
       regression.
+- [x] Coarray declarations and basic image-control statements are covered by a
+      live no-false-diagnostics regression.
 - [ ] **Skeletons ready in `tests.rs`** — each remaining construct has an
       `#[ignore]`d test specifying the expected behavior (search for
       `TODO(codex)`); remove the `#[ignore]`, run, implement until green:
-      - `coarray_declarations_are_tolerated`
       - `parameterized_derived_types_resolve`
       - `defined_io_generic_bindings_resolve`
       - `continued_calls_are_argument_checked` (fixed-form continuation cards
