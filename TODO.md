@@ -41,9 +41,10 @@ workspace-level plan.
       (netlib ODEPACK: 416 false errors → 0).
 - [x] Linear-time parse on large legacy files (`line_interface_state`
       memoized; masking pass prefilters by name — 10k-line file 5.9s → 173ms).
-- [ ] Keep expanding real-project differentials and close concrete gaps found
-      there. ODEPACK is now a project-mode fixture with documented fortls-only
-      legacy-demo noise filtered by the harness.
+- [x] Project-mode differentials cover diagnostics, document/workspace symbols,
+      and bounded `textDocument/definition` probes on real declaration
+      positions. ODEPACK is now a project-mode fixture with documented
+      fortls-only legacy-demo noise filtered by the harness.
 
 ## Open Work
 
@@ -63,8 +64,8 @@ Keep using `scripts/fortran_lsp_compare.py` as the gate:
 
 Next useful work:
 
-- Add broader/manual project-mode LSP request coverage where it can be compared
-  reliably.
+- Project-mode request coverage now includes bounded definition probes on real
+  declaration positions. Add more request types only when they compare reliably.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
   fortls open-order noise, generated-template artifacts, and harness limits.
