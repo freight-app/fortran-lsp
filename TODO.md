@@ -104,8 +104,9 @@ Next useful work:
       inserts after the scope's last `use`, fixed-form aware).
 - [x] Formatting provider: `textDocument/formatting` shells out to
       `fprettify` (stdin→stdout) for free-form Fortran when it is on PATH;
-      answers null otherwise; forwards non-Fortran to clangd. TODO(codex):
-      thread `[language.fortran]` style options through as fprettify flags.
+      answers null otherwise; forwards non-Fortran to clangd; threads
+      `[language.fortran]` `indent`/`indent_width` and `max_line_length`
+      through as fprettify flags.
 - [x] Single-open-file differential mode: `fortran_lsp_compare.py
       --project <dir> --open-only <substring>` opens only matching files while
       both servers index the whole tree — catches the workspace-indexing bug
