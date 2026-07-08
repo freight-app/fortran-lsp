@@ -3928,13 +3928,23 @@ impl Workspace {
             include_stack.push(path);
             let mut include_scope = scope_prefix.to_vec();
             include_scope.extend(include.scope.iter().cloned());
-            symbols.extend(included.symbols.iter().map(|sym| {
+            let implicit_program_scope = implicit_include_program_scope(included);
+            symbols.extend(included.symbols.iter().filter_map(|sym| {
+                if implicit_program_scope.as_deref().is_some_and(|scope| {
+                    sym.scope.is_empty() && sym.name.eq_ignore_ascii_case(scope)
+                }) {
+                    return None;
+                }
                 let mut effective_scope = include_scope.clone();
-                effective_scope.extend(sym.scope.iter().cloned());
-                IncludedSymbol {
+                effective_scope.extend(
+                    strip_implicit_include_scope(&sym.scope, implicit_program_scope.as_deref())
+                        .iter()
+                        .cloned(),
+                );
+                Some(IncludedSymbol {
                     symbol: sym,
                     effective_scope,
-                }
+                })
             }));
             self.collect_include_symbols(included, &include_scope, include_stack, symbols);
             include_stack.pop();
@@ -5216,6 +5226,35 @@ fn visible_scope_match_len(current: &[String], candidate: &[String]) -> Option<u
     }
     let len = scope_match_len(current, candidate);
     (len == candidate.len()).then_some(len)
+}
+
+fn implicit_include_program_scope(file: &ParsedFile) -> Option<String> {
+    let name = file.path.file_stem()?.to_str()?;
+    let signature = format!("program {name}");
+    file.symbols
+        .iter()
+        .any(|sym| {
+            sym.kind == SymbolKind::Program
+                && sym.scope.is_empty()
+                && sym.name.eq_ignore_ascii_case(name)
+                && sym.signature.eq_ignore_ascii_case(&signature)
+        })
+        .then(|| name.to_string())
+}
+
+fn strip_implicit_include_scope<'a>(
+    scope: &'a [String],
+    implicit_scope: Option<&str>,
+) -> &'a [String] {
+    if implicit_scope.is_some_and(|name| {
+        scope
+            .first()
+            .is_some_and(|scope_name| scope_name.eq_ignore_ascii_case(name))
+    }) {
+        &scope[1..]
+    } else {
+        scope
+    }
 }
 
 fn insert_semantic_token(

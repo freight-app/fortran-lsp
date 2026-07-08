@@ -1733,12 +1733,13 @@ fn reports_contains_statement_errors() {
 }
 
 #[test]
-fn reports_implicit_without_enclosing_scope() {
-    let parsed = ParsedFile::parse("implicit_top.f90", "implicit none");
-    assert!(parsed.diagnostics.iter().any(|diag| {
-        diag.message
-            .contains("IMPLICIT statement without enclosing scope")
-    }));
+fn implicit_statement_opens_unnamed_main_program() {
+    let parsed = ParsedFile::parse("implicit_top.f90", "implicit none\ninteger :: x\nend");
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert!(parsed
+        .symbols
+        .iter()
+        .any(|sym| sym.kind == SymbolKind::Program && sym.name == "implicit_top"));
 
     let valid = ParsedFile::parse(
         "implicit_program.f90",

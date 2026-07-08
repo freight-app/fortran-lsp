@@ -186,6 +186,13 @@ impl<'a> Parser<'a> {
             self.close_scope(line_no, &lower);
             return;
         }
+        if self.scopes.is_empty()
+            && !is_include_fragment_path(&self.path)
+            && parse_scope_start(code).is_none()
+            && lower != "contains"
+        {
+            self.open_scope(line_no, implicit_program_start(&self.path, code));
+        }
         if lower == "contains" {
             self.mark_contains_statement(line_no, code);
             return;
@@ -1652,6 +1659,12 @@ fn path_has_free_form_hint(path: &Path) -> bool {
     })
 }
 
+fn is_include_fragment_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "inc" | "h" | "fh"))
+}
+
 pub(crate) fn is_fixed_comment(line: &str) -> bool {
     line.as_bytes()
         .first()
@@ -1672,6 +1685,29 @@ struct ScopeStart {
     is_module_procedure: bool,
     ancestor: Option<String>,
     associate_names: Vec<String>,
+}
+
+fn implicit_program_start(path: &Path, code: &str) -> ScopeStart {
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    ScopeStart {
+        kind: SymbolKind::Program,
+        selection: first_ident(code).unwrap_or(&name).to_string(),
+        name: name.clone(),
+        args: Vec::new(),
+        signature: format!("program {name}"),
+        attributes: Vec::new(),
+        visibility: None,
+        extends: None,
+        is_abstract: false,
+        is_module_procedure: false,
+        ancestor: None,
+        associate_names: Vec::new(),
+    }
 }
 
 fn parse_scope_start(code: &str) -> Option<ScopeStart> {
