@@ -94,12 +94,8 @@ Next useful work:
       no-false-diagnostics regression.
 - [x] Defined I/O generic bindings are covered by a live no-false-diagnostics
       regression.
-- [ ] **Skeletons ready in `tests.rs`** — each remaining construct has an
-      `#[ignore]`d test specifying the expected behavior (search for
-      `TODO(codex)`); remove the `#[ignore]`, run, implement until green:
-      - `continued_calls_are_argument_checked` (fixed-form continuation cards
-        make a call invisible to `calls_on_line`; fold continuations but keep
-        diagnostic ranges on the physical start line)
+- [x] Continued fixed-form calls are folded for argument diagnostics while
+      keeping diagnostic ranges anchored to the physical call-start line.
 
 ### 3. LSP Surface Gaps
 

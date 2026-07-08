@@ -2957,17 +2957,12 @@ impl Workspace {
 
     fn call_diagnostics(&self, file: &ParsedFile) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        let fixed_form = is_fixed_form_path(&file.path);
-        for (line_no, line) in file.source.lines().enumerate() {
-            // Fixed-form comment cards (`C`/`*` in column 1) are not code.
-            if fixed_form && is_fixed_comment(line) {
+        for (line_no, line) in call_diagnostic_lines(file) {
+            if is_procedure_definition_line(&line) {
                 continue;
             }
-            if is_procedure_definition_line(line) {
-                continue;
-            }
-            for call in calls_on_line(line, line_no) {
-                if line_call_is_typed_array_constructor(line, &call) {
+            for call in calls_on_line(&line, line_no) {
+                if line_call_is_typed_array_constructor(&line, &call) {
                     continue;
                 }
                 let scope = file.scope_at(call.range().start);
@@ -5346,6 +5341,93 @@ fn calls_on_line(line: &str, line_no: usize) -> Vec<LineCall> {
         }
     }
     calls
+}
+
+fn call_diagnostic_lines(file: &ParsedFile) -> Vec<(usize, String)> {
+    let physical: Vec<_> = file
+        .source
+        .lines()
+        .enumerate()
+        .map(|(idx, line)| (idx, line.to_string()))
+        .collect();
+    if is_fixed_form_path(&file.path) {
+        fixed_call_lines(physical)
+    } else {
+        free_call_lines(physical)
+    }
+}
+
+fn free_call_lines(physical: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut start = 0usize;
+    for (idx, line) in physical {
+        let raw_trimmed = line.trim_end();
+        let code = strip_fortran_comment(&line);
+        let trimmed = code.trim_end();
+        if raw_trimmed.trim().is_empty() && !current.is_empty() {
+            continue;
+        }
+        let comment_only = raw_trimmed.trim_start().starts_with('!');
+        if comment_only && !current.is_empty() {
+            continue;
+        }
+        if comment_only {
+            out.push((idx, raw_trimmed.trim().to_string()));
+            continue;
+        }
+        let continued = trimmed.ends_with('&');
+        let part = trimmed.trim_end_matches('&').trim_end();
+        if current.is_empty() {
+            start = idx;
+        } else {
+            current.push(' ');
+        }
+        current.push_str(part.trim_start_matches('&').trim_start());
+        if !continued {
+            out.push((start, current.trim().to_string()));
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        out.push((start, current.trim().to_string()));
+    }
+    out
+}
+
+fn fixed_call_lines(physical: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut start = 0usize;
+    for (idx, line) in physical {
+        if is_fixed_comment(&line) {
+            continue;
+        }
+        let continued = line
+            .as_bytes()
+            .get(5)
+            .is_some_and(|ch| !matches!(*ch as char, ' ' | '0'));
+        let body = if line.len() > 6 {
+            &line[6..line.len().min(72)]
+        } else {
+            ""
+        };
+        if continued && !current.is_empty() {
+            current.push(' ');
+            current.push_str(body.trim_start());
+            continue;
+        }
+        if !current.is_empty() {
+            out.push((start, current.trim().to_string()));
+            current.clear();
+        }
+        start = idx;
+        current.push_str(body.trim());
+    }
+    if !current.is_empty() {
+        out.push((start, current.trim().to_string()));
+    }
+    out
 }
 
 fn starts_declaration_like(line: &str) -> bool {

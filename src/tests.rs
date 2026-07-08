@@ -6103,16 +6103,12 @@ fn block_data_units_and_common_block_names_are_indexed() {
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
 }
 
-// ── Skeletons for unimplemented fortls-port features ─────────────────────────
-// Each #[ignore]d test below specifies the expected behavior of a feature that
-// is not implemented yet. To pick one up: remove #[ignore], run it, implement
-// until green. Keep the no-false-diagnostics stance: tolerating a construct
-// silently is always acceptable; wrong errors are not.
+// ── Fortls-port regressions ──────────────────────────────────────────────────
+// Keep the no-false-diagnostics stance: tolerating a construct silently is
+// acceptable; wrong errors are not.
 
-/// TODO(codex): EQUIVALENCE — `equivalence (a, b)` aliases storage. Minimum:
-/// tolerate silently (works today); full: hover/definition on `b` should note
-/// the aliased `a`. This test only pins the no-false-positives floor plus
-/// symbol existence for the declared variables.
+/// EQUIVALENCE — `equivalence (a, b)` aliases storage. This test pins the
+/// no-false-positives floor plus symbol existence for declared/implicit names.
 #[test]
 fn equivalence_statements_are_tolerated_and_members_resolve() {
     let source = [
@@ -6131,10 +6127,8 @@ fn equivalence_statements_are_tolerated_and_members_resolve() {
     assert!(parsed.symbols.iter().any(|sym| sym.name == "C"));
 }
 
-/// TODO(codex): statement functions — `f(x) = x * 2.0` before the first
-/// executable statement defines a function-like symbol `f` local to the
-/// scope. Today the line is treated as an assignment (no symbol). Signature
-/// help / hover on `f` should show `f(x)`.
+/// Statement functions — `f(x) = x * 2.0` before the first executable
+/// statement defines a function-like symbol `f` local to the scope.
 #[test]
 fn statement_functions_get_local_function_symbols() {
     let source = [
@@ -6157,9 +6151,8 @@ fn statement_functions_get_local_function_symbols() {
     assert_eq!(f.args, vec!["X"]);
 }
 
-/// TODO(codex): `do concurrent` locality specs — names in `local(...)` /
-/// `local_init(...)` / `shared(...)` are construct-local variables; they
-/// currently get no symbols, so references/rename inside the loop miss them.
+/// `do concurrent` locality specs — names in `local(...)` / `local_init(...)`
+/// / `shared(...)` must not trigger false parent-masking diagnostics.
 #[test]
 fn do_concurrent_locality_names_are_scoped() {
     let source = "subroutine s()\n  integer :: i\n  real :: total\n\
@@ -6175,9 +6168,9 @@ fn do_concurrent_locality_names_are_scoped() {
         .any(|d| d.message.contains("masks")),);
 }
 
-/// TODO(codex): coarrays — `codimension[*]` / `real :: x[*]` declarations and
-/// image-control statements (`sync all`, `sync images`, `event post`). Floor:
-/// no false diagnostics; full: the codimension shows in hover/signature.
+/// Coarrays — `codimension[*]` / `real :: x[*]` declarations and image-control
+/// statements (`sync all`, `sync images`, `event post`) should not produce
+/// false diagnostics.
 #[test]
 fn coarray_declarations_are_tolerated() {
     let source = "module m\n  real :: field(10)[*]\n  integer, codimension[*] :: counter\n\
@@ -6189,9 +6182,8 @@ fn coarray_declarations_are_tolerated() {
     assert!(parsed.symbols.iter().any(|sym| sym.name == "counter"));
 }
 
-/// TODO(codex): parameterized derived types — `type :: t(k, n)` with
-/// `kind`/`len` type parameters. Floor: the type + components get symbols and
-/// `type(t(4, 10)) :: v` declarations resolve; no false diagnostics.
+/// Parameterized derived types — `type :: t(k, n)` with `kind`/`len` type
+/// parameters should index the type and resolve `type(t(...))` declarations.
 #[test]
 fn parameterized_derived_types_resolve() {
     let source = "module m\n  type :: matrix(k, n)\n    integer, kind :: k\n\
@@ -6206,9 +6198,8 @@ fn parameterized_derived_types_resolve() {
     assert!(parsed.symbols.iter().any(|sym| sym.name == "small"));
 }
 
-/// TODO(codex): defined I/O — `generic :: write(formatted) => write_impl` (and
-/// the interface form) binds a user-defined I/O routine. Floor: parsed as a
-/// generic binding without diagnostics; the bound procedure resolves.
+/// Defined I/O — `generic :: write(formatted) => write_impl` binds a
+/// user-defined I/O routine without false diagnostics.
 #[test]
 fn defined_io_generic_bindings_resolve() {
     let source = "module m\n  type :: t\n  contains\n\
@@ -6223,14 +6214,9 @@ fn defined_io_generic_bindings_resolve() {
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
 }
 
-/// TODO(codex): calls spanning continuation lines are invisible to the call
-/// checker — `calls_on_line` sees one physical line, so a call whose argument
-/// list continues on the next card is (silently) unchecked. The checker
-/// should fold continuations (reuse the parser's logical-line machinery, but
-/// keep diagnostic ranges anchored to the physical start line) and then
-/// diagnose missing/extra args exactly like single-line calls.
+/// Calls spanning continuation lines are folded before argument diagnostics,
+/// with ranges anchored to the physical call-start line.
 #[test]
-#[ignore = "continued calls are not yet checked"]
 fn continued_calls_are_argument_checked() {
     let mut ws = Workspace::new();
     let source = [
