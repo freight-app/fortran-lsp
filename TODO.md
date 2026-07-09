@@ -145,6 +145,8 @@ and run the deterministic harness for every completed point.
       help, references, completion, implementation, rename, folding, and
       semantic-token probes on real source positions. Keep each probe type
       gated only after it is stable against fortls open-order and timing noise.
+      Sampled declaration-position hover probes are now live and pass minpack +
+      ODEPACK; remaining request types are still open.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
