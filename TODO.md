@@ -66,10 +66,10 @@ Next useful work:
 
 - Project-mode request coverage now includes bounded definition probes, hover
   probes on real declaration positions, same-file free-form reference probes,
-  and concrete call-site signature-help probes. Procedure dummy / callback call
-  signatures and fixed-form/cross-file reference policy remain under later
-  modelling/debugging work; add more request types only when they compare
-  reliably.
+  concrete call-site signature-help probes, and free-form call-statement
+  completion probes. Procedure dummy / callback call signatures and
+  fixed-form/cross-file reference policy remain under later modelling/debugging
+  work; add more request types only when they compare reliably.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
   fortls open-order noise, generated-template artifacts, and harness limits.

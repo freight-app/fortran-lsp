@@ -1052,7 +1052,7 @@ impl Workspace {
         let current_scope = file.scope_at(pos);
         let mut items = BTreeMap::new();
         for sym in &file.symbols {
-            if callable_completion_symbol(sym)
+            if call_statement_completion_symbol(file, sym)
                 && sym.name.to_ascii_lowercase().starts_with(prefix)
                 && visible_scope_match_len(&current_scope, &sym.scope).is_some()
             {
@@ -1061,7 +1061,7 @@ impl Workspace {
         }
         for included in self.include_symbols(file) {
             let sym = included.symbol;
-            if callable_completion_symbol(sym)
+            if call_statement_completion_symbol(file, sym)
                 && sym.name.to_ascii_lowercase().starts_with(prefix)
                 && visible_scope_match_len(&current_scope, &included.effective_scope).is_some()
             {
@@ -4164,13 +4164,24 @@ impl Workspace {
     }
 
     fn module_export_symbols<'a>(&'a self, module: &str) -> Vec<&'a Symbol> {
-        self.files
+        let mut symbols: Vec<_> = self
+            .files
             .values()
             .flat_map(|file| file.symbols.iter())
             .filter(|sym| {
                 module_export_scope_matches(&sym.scope, module) && self.is_module_export(sym)
             })
-            .collect()
+            .collect();
+        for file in self.files.values() {
+            for included in self.include_symbols(file) {
+                if module_export_scope_matches(&included.effective_scope, module)
+                    && self.is_module_export_at_scope(included.symbol, &included.effective_scope)
+                {
+                    symbols.push(included.symbol);
+                }
+            }
+        }
+        symbols
     }
 
     fn module_exports_use_associated_name(&self, module: &str, name: &str) -> bool {
@@ -4295,14 +4306,17 @@ impl Workspace {
     }
 
     fn is_module_export(&self, sym: &Symbol) -> bool {
+        self.is_module_export_at_scope(sym, &sym.scope)
+    }
+
+    fn is_module_export_at_scope(&self, sym: &Symbol, scope: &[String]) -> bool {
         if sym.visibility == Visibility::Private {
             return false;
         }
-        sym.scope.len() == 1
+        scope.len() == 1
             || (matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function)
-                && sym.scope.len() >= 2
-                && sym
-                    .scope
+                && scope.len() >= 2
+                && scope
                     .iter()
                     .any(|part| part.eq_ignore_ascii_case("interface")))
     }
@@ -6359,6 +6373,10 @@ fn abstract_interface_prototype_host_scope<'a>(
 
 fn callable_completion_symbol(sym: &Symbol) -> bool {
     matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Interface)
+}
+
+fn call_statement_completion_symbol(file: &ParsedFile, sym: &Symbol) -> bool {
+    callable_completion_symbol(sym) || procedure_dummy_symbol(file, sym)
 }
 
 fn is_module_procedure_link(sym: &Symbol) -> bool {

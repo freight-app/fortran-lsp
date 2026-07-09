@@ -3372,6 +3372,11 @@ call ren\n\
 call cpu\n\
 call h\n\
 call axpy(ap\n\
+contains\n\
+subroutine run(axpy_cb)\n\
+procedure(axpy) :: axpy_cb\n\
+call axpy_c\n\
+end subroutine\n\
 end program";
     ws.upsert_file(PathBuf::from("math.f90"), math);
     ws.upsert_file(PathBuf::from("hidden.f90"), hidden);
@@ -3403,6 +3408,12 @@ end program";
     let argument_items = ws.completions_at(Path::new("app.f90"), Position::new(11, 12), "ap");
     assert!(argument_items.iter().any(|item| item.label == "apple"));
     assert!(!argument_items.iter().any(|item| item.label == "axpy"));
+
+    let procedure_dummy_items =
+        ws.completions_at(Path::new("app.f90"), Position::new(15, 11), "axpy_c");
+    assert!(procedure_dummy_items
+        .iter()
+        .any(|item| item.label == "axpy_cb"));
 }
 
 #[test]
@@ -6906,6 +6917,20 @@ fn include_symbols_are_visible_for_hover_definition_and_completion() {
     assert!(hover.contains("integer :: answer"));
     let completions = ws.completions(Path::new("app.f90"), "ans");
     assert!(completions.iter().any(|item| item.label == "answer"));
+}
+
+#[test]
+fn included_module_exports_are_visible_for_call_completion() {
+    let mut ws = Workspace::new();
+    let module = "module m\ninclude 'solver.inc'\nend module";
+    let include = "subroutine dlsoda()\nend subroutine";
+    let app = "program app\nuse m\ncall dls\nend program";
+    ws.upsert_file(PathBuf::from("m.f90"), module);
+    ws.upsert_file(PathBuf::from("solver.inc"), include);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let completions = ws.completions_at(Path::new("app.f90"), Position::new(2, 8), "dls");
+    assert!(completions.iter().any(|item| item.label == "dlsoda"));
 }
 
 #[test]
