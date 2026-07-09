@@ -298,13 +298,11 @@ The initial parser shape mirrors fortls concepts:
 - module/use visibility: `use mod, only: name`
 - diagnostics as parser/indexer output, not server output
 
-Known next ports from fortls:
-
-- fuller C-preprocessor expression support (basic conditionals, numeric
-  comparisons, and object/function-like macro expansion are implemented)
-- broader polymorphic dispatch modelling when multiple runtime target types are
-  possible
-- richer diagnostics for procedure/type interface compatibility
+Known next hardening work lives in `TODO.md` and is tracked one point at a
+time. The current focus areas are project-mode request parity, remaining
+C-preprocessor edge cases, procedure pointer/callback modelling, richer generic
+overload selection, editor-surface audits, and measured incremental dependency
+invalidation.
 
 ## Assembly LSP note
 

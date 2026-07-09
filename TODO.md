@@ -24,7 +24,7 @@ workspace-level plan.
 - [x] Freight adapter tests cover LSP-shaped native responses.
 - [x] Deterministic JSON-RPC harness covers shared fortls behavior plus
       Freight-only native surfaces.
-- [x] Full 17-project oracle sweep passes with the stable project-mode timing
+- [x] Full 18-project oracle sweep passes with the stable project-mode timing
       gate (`--diagnostic-quiet 5.0`).
 - [x] Workspace-wide indexing: `refresh_flags` walks project + dep include
       roots and indexes every Fortran file (parallel parse via
@@ -132,6 +132,41 @@ Next useful work:
       (The former O(n²) hotspot — `line_interface_state` rescanning the source
       per query — is fixed by per-file memoization; the test suite dropped
       25.5s → 0.8s.)
+
+### 5. Next Hardening Cycle
+
+These are the next TODO points for taking native `fortran-lsp` from "fortls
+replacement in normal freight projects" to "hard to distinguish from fortls on
+large and unusual Fortran codebases". Work them one at a time; add a regression
+and run the deterministic harness for every completed point.
+
+- [ ] Project-mode request parity beyond symbols/diagnostics. Extend
+      `scripts/fortran_lsp_compare.py --project` with sampled hover, signature
+      help, references, completion, implementation, rename, folding, and
+      semantic-token probes on real source positions. Keep each probe type
+      gated only after it is stable against fortls open-order and timing noise.
+- [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
+      seen in production Fortran: macro stringification (`#`), token pasting
+      (`##`), recursive/nested macro expansion in directive expressions,
+      `#line` / line-marker tolerance, and multiline macro bodies with
+      continuations. Port only with focused fixtures or real-project evidence.
+- [ ] Procedure pointer and callback modelling. Index and resolve
+      `procedure(interface), pointer :: cb`, dummy procedure arguments,
+      procedure-pointer assignments, calls through procedure variables, and
+      procedure pointer components without confusing them with type-bound
+      bindings. Add hover/definition/signature/diagnostic coverage.
+- [ ] Generic overload selection by argument characteristics. Improve generic
+      interface and type-bound generic resolution beyond argument count and
+      keyword names by using declared actual/dummy types where available,
+      optional arguments, elemental/pure compatibility, and ambiguity reporting.
+- [ ] Semantic-token, folding, and document-highlight audit. Compare Freight's
+      native editor-only surfaces against real projects and editor snapshots:
+      preprocessor tokens, type-bound bindings, generic interfaces,
+      submodules, labels, fixed-form continuations, and include-grafted symbols.
+- [ ] Incremental dependency invalidation. Measure large-project edits in
+      stdlib/fpm/ODEPACK, then cache include/module dependency edges so edits
+      to included files or exported module APIs re-index only affected
+      dependents while body-only edits keep the global index stable.
 
 ## Real-Project Oracle Fixtures
 
