@@ -1206,7 +1206,7 @@ impl Workspace {
                     documentation: target.documentation.clone(),
                 });
             }
-            if sym.args.is_empty() {
+            if !matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function) {
                 return None;
             }
             return Some(SignatureHelp {
@@ -1464,11 +1464,12 @@ impl Workspace {
     ) -> Option<SignatureHelp> {
         let target = self.method_target_symbol(sym)?;
         let args = method_call_args(sym, target);
-        if args.is_empty() {
-            return None;
-        }
         Some(SignatureHelp {
-            label: format!("{}({})", sym.name, args.join(", ")),
+            label: if args.is_empty() {
+                format!("{}()", sym.name)
+            } else {
+                format!("{}({})", sym.name, args.join(", "))
+            },
             parameters: args.clone(),
             active_parameter: signature_active_parameter(
                 &args,

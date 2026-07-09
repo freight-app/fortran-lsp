@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    semantic_token_type, GenericBindingKind, ParsedFile, Position, PreprocessorKind, RenameError,
-    SemanticToken, SymbolKind, Visibility, Workspace,
+    parser::call_context, semantic_token_type, GenericBindingKind, ParsedFile, Position,
+    PreprocessorKind, RenameError, SemanticToken, SymbolKind, Visibility, Workspace,
 };
 
 #[test]
@@ -190,8 +190,10 @@ fn workspace_upsert_skips_unchanged_source() {
 fn workspace_upsert_preserves_symbol_index_for_body_only_changes() {
     let mut ws = Workspace::new();
     let path = PathBuf::from("math.f90");
-    let first = "module math\ncontains\nsubroutine axpy()\n! first body note\nend subroutine\nend module";
-    let second = "module math\ncontains\nsubroutine axpy()\n! second body note\nend subroutine\nend module";
+    let first =
+        "module math\ncontains\nsubroutine axpy()\n! first body note\nend subroutine\nend module";
+    let second =
+        "module math\ncontains\nsubroutine axpy()\n! second body note\nend subroutine\nend module";
 
     assert!(ws.upsert_file(path.clone(), first));
     assert!(ws.upsert_file(path.clone(), second));
@@ -2236,7 +2238,7 @@ fn signature_help_tracks_active_parameter() {
     ws.upsert_file(PathBuf::from("math.f90"), src);
     ws.upsert_file(PathBuf::from("app.f90"), app);
     let sig = ws
-        .signature_help(Path::new("app.f90"), Position::new(2, 18), app)
+        .signature_help(Path::new("app.f90"), Position::new(2, 17), app)
         .unwrap();
     assert_eq!(sig.parameters, vec!["a", "x", "y"]);
     assert_eq!(sig.active_parameter, 1);
@@ -2254,6 +2256,24 @@ fn signature_help_tracks_keyword_arguments() {
         .unwrap();
     assert_eq!(sig.parameters, vec!["a", "x", "y"]);
     assert_eq!(sig.active_parameter, 2);
+}
+
+#[test]
+fn signature_help_reports_zero_argument_procedures() {
+    let mut ws = Workspace::new();
+    let src = "module math\ncontains\nsubroutine check_deriv()\nend subroutine\nend module";
+    let app = "program app\nuse math, only: check_deriv\ncall check_deriv()\nend program";
+    ws.upsert_file(PathBuf::from("math.f90"), src);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+    let context = call_context(app, Position::new(2, 17)).unwrap();
+    assert_eq!(context.name, "check_deriv");
+    assert_eq!(context.argument_count, 0);
+    let sig = ws
+        .signature_help(Path::new("app.f90"), Position::new(2, 17), app)
+        .unwrap();
+    assert_eq!(sig.label, "subroutine check_deriv()");
+    assert!(sig.parameters.is_empty());
+    assert_eq!(sig.active_parameter, 0);
 }
 
 #[test]

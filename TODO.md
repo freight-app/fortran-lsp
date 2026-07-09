@@ -64,8 +64,10 @@ Keep using `scripts/fortran_lsp_compare.py` as the gate:
 
 Next useful work:
 
-- Project-mode request coverage now includes bounded definition probes on real
-  declaration positions. Add more request types only when they compare reliably.
+- Project-mode request coverage now includes bounded definition probes, hover
+  probes on real declaration positions, and concrete call-site signature-help
+  probes. Procedure dummy / callback call signatures remain under the callback
+  modelling TODO; add more request types only when they compare reliably.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
   fortls open-order noise, generated-template artifacts, and harness limits.
