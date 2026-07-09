@@ -3901,7 +3901,7 @@ pub(crate) fn identifier_occurrences(source: &str, name: &str) -> Vec<Range> {
     let wanted = name.to_ascii_lowercase();
     let mut out = Vec::new();
     for (line_no, line) in source.lines().enumerate() {
-        let code = strip_inline_comment(line);
+        let code = mask_quoted_content(&strip_inline_comment(line));
         let bytes = code.as_bytes();
         let mut idx = 0;
         while idx < bytes.len() {
@@ -3916,10 +3916,41 @@ pub(crate) fn identifier_occurrences(source: &str, name: &str) -> Vec<Range> {
             }
             if code[start..idx].eq_ignore_ascii_case(&wanted) {
                 out.push(Range {
-                    start: Position::new(line_no, utf16_col(&code, start)),
-                    end: Position::new(line_no, utf16_col(&code, idx)),
+                    start: Position::new(line_no, utf16_col(line, start)),
+                    end: Position::new(line_no, utf16_col(line, idx)),
                 });
             }
+        }
+    }
+    out
+}
+
+fn mask_quoted_content(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut quote: Option<char> = None;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(current) => {
+                for _ in 0..ch.len_utf8() {
+                    out.push(' ');
+                }
+                if ch == current {
+                    if chars.peek() == Some(&current) {
+                        let escaped = chars.next().expect("peeked escaped quote");
+                        for _ in 0..escaped.len_utf8() {
+                            out.push(' ');
+                        }
+                    } else {
+                        quote = None;
+                    }
+                }
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                out.push(' ');
+            }
+            None => out.push(ch),
         }
     }
     out

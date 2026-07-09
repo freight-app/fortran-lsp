@@ -2840,6 +2840,25 @@ fn finds_references_across_used_modules() {
 }
 
 #[test]
+fn references_skip_names_inside_string_literals() {
+    let mut ws = Workspace::new();
+    let math = "module math\ncontains\nsubroutine chkder()\nend subroutine chkder\nend module";
+    let app = "program app\nuse math, only: chkder\nprint *, 'TESTS OF CHKDER'\ncall chkder()\nend program";
+    ws.upsert_file(PathBuf::from("math.f90"), math);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let refs = ws.references(Path::new("app.f90"), Position::new(3, 6), app);
+    assert!(refs
+        .iter()
+        .any(|loc| loc.file == PathBuf::from("app.f90") && loc.range.start.line == 3));
+    assert!(
+        refs.iter()
+            .all(|loc| loc.file != PathBuf::from("app.f90") || loc.range.start.line != 2),
+        "{refs:?}"
+    );
+}
+
+#[test]
 fn rename_returns_workspace_text_edits() {
     let mut ws = Workspace::new();
     let math = "module math\ncontains\nsubroutine axpy()\nend subroutine axpy\nend module";
