@@ -74,7 +74,7 @@ Next useful work:
   modelling/debugging work; add more request types only when they compare
   reliably.
 - Next point-1 sub-points, in order:
-  - [ ] Add project-mode semantic-token probes with a small normalized token
+  - [x] Add project-mode semantic-token probes with a small normalized token
         summary per file before considering full token-array comparison.
   - [ ] Add project-mode document-highlight probes on sampled same-file
         declaration/reference pairs, normalized to line spans.
@@ -175,6 +175,9 @@ and run the deterministic harness for every completed point.
       procedure signature help, derived-type receiver call completion, implicit
       function-result reference filtering, and declaration-probe sampling that
       no longer treats `type(name) :: var` as a derived-type definition.
+      Semantic-token probes are now live with capped normalized summaries
+      (token count, valid token count, covered lines, token-type histogram);
+      minpack, ODEPACK, and full neural-fortran pass.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
