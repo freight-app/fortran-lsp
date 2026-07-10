@@ -74,8 +74,18 @@ Next useful work:
   modelling/debugging work; add more request types only when they compare
   reliably.
 - Next point-1 sub-points, in order:
-  1. Add semantic-token probes with a small normalized token summary per file
-     before considering full token-array comparison.
+  - [ ] Add project-mode semantic-token probes with a small normalized token
+        summary per file before considering full token-array comparison.
+  - [ ] Add project-mode document-highlight probes on sampled same-file
+        declaration/reference pairs, normalized to line spans.
+  - [ ] Add project-mode selection-range probes for representative free-form
+        declarations, call expressions, and fixed-form continuation blocks.
+  - [ ] Add project-mode code-action probes only where the fixture has a real
+        missing-import opportunity; otherwise keep code actions deterministic.
+  - [ ] Re-run the full 18-project oracle sweep after the new request probes
+        are stable on minpack, neural-fortran, and ODEPACK.
+  - [ ] Close the duplicate "Project-mode request parity" item in the hardening
+        cycle once these probes are live and documented here.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
   fortls open-order noise, generated-template artifacts, and harness limits.
