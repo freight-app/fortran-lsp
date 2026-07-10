@@ -2337,6 +2337,25 @@ fn signature_help_reports_zero_argument_procedures() {
 }
 
 #[test]
+fn signature_help_resolves_reexported_module_procedures() {
+    let mut ws = Workspace::new();
+    let datasets =
+        "module datasets\ninterface\nmodule subroutine load_mnist(images, labels)\nreal :: images(:,:)\nreal :: labels(:)\nend subroutine\nend interface\nend module";
+    let api = "module api\nuse datasets, only: load_mnist\nend module";
+    let app =
+        "program app\nuse api, only: load_mnist\ncall load_mnist(images, labels)\nend program";
+    ws.upsert_file(PathBuf::from("datasets.f90"), datasets);
+    ws.upsert_file(PathBuf::from("api.f90"), api);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let sig = ws
+        .signature_help(Path::new("app.f90"), Position::new(2, 18), app)
+        .unwrap();
+    assert_eq!(sig.label, "load_mnist(images, labels)");
+    assert_eq!(sig.parameters, vec!["images", "labels"]);
+}
+
+#[test]
 fn inlay_hints_show_positional_argument_names() {
     let mut ws = Workspace::new();
     let src = "module math\ncontains\nsubroutine axpy(a, x, y)\nend subroutine\nend module";
@@ -2919,6 +2938,30 @@ fn references_skip_names_inside_string_literals() {
 }
 
 #[test]
+fn references_skip_implicit_function_result_assignments() {
+    let mut ws = Workspace::new();
+    let app = "program app\n\
+print *, accuracy(1.0)\n\
+contains\n\
+real function accuracy(x)\n\
+real :: x\n\
+accuracy = x\n\
+end function accuracy\n\
+end program";
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let refs = ws.references(Path::new("app.f90"), Position::new(1, 10), app);
+    assert!(refs
+        .iter()
+        .any(|loc| loc.file == PathBuf::from("app.f90") && loc.range.start.line == 1));
+    assert!(
+        refs.iter()
+            .all(|loc| loc.file != PathBuf::from("app.f90") || loc.range.start.line != 5),
+        "{refs:?}"
+    );
+}
+
+#[test]
 fn rename_returns_workspace_text_edits() {
     let mut ws = Workspace::new();
     let math = "module math\ncontains\nsubroutine axpy()\nend subroutine axpy\nend module";
@@ -3278,6 +3321,31 @@ end module";
     assert!(call_items.iter().any(|item| item.label == "case_call"));
     assert!(!call_items.iter().any(|item| item.label == "call"));
     assert!(!call_items.iter().any(|item| item.label == "case_count"));
+}
+
+#[test]
+fn call_statement_completions_offer_derived_type_receivers() {
+    let mut ws = Workspace::new();
+    let src = "module m\n\
+type :: network\n\
+contains\n\
+procedure :: print_info\n\
+end type\n\
+contains\n\
+subroutine run()\n\
+type(network) :: net\n\
+integer :: count\n\
+call ne\n\
+end subroutine\n\
+subroutine print_info(self)\n\
+class(network) :: self\n\
+end subroutine\n\
+end module";
+    ws.upsert_file(PathBuf::from("m.f90"), src);
+
+    let items = ws.completions_at(Path::new("m.f90"), Position::new(9, 7), "ne");
+    assert!(items.iter().any(|item| item.label == "net"), "{items:?}");
+    assert!(!items.iter().any(|item| item.label == "count"));
 }
 
 #[test]

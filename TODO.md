@@ -73,14 +73,11 @@ Next useful work:
   modelling/debugging work; add more request types only when they compare
   reliably.
 - Next point-1 sub-points, in order:
-  1. Stabilize full-project neural-fortran request probes: current full-project
-     run exposes non-implementation mismatches in example-program definition,
-     same-file references, signature-help labels, and completion probes.
-  2. Add rename probes on local declarations after the definition/reference
+  1. Add rename probes on local declarations after the definition/reference
      sampler is stable enough to avoid type-constructor and variable noise.
-  3. Add folding-range probes on modules, interfaces, submodules, and fixed-form
+  2. Add folding-range probes on modules, interfaces, submodules, and fixed-form
      continuation-heavy files.
-  4. Add semantic-token probes with a small normalized token summary per file
+  3. Add semantic-token probes with a small normalized token summary per file
      before considering full token-array comparison.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
@@ -164,10 +161,11 @@ and run the deterministic harness for every completed point.
       Sampled declaration-position hover probes, same-file free-form reference
       probes, concrete call-site signature probes, call-statement completion
       probes, and ancestor module-procedure implementation probes are now live;
-      minpack + ODEPACK pass. A neural-fortran submodule slice verifies
-      implementation probes; full neural-fortran still exposes broader
-      non-implementation request mismatches that should be handled before
-      adding rename/folding/semantic-token gates.
+      minpack, ODEPACK, and full neural-fortran pass. Full neural-fortran
+      stabilization added coverage for re-exported procedure signature help,
+      derived-type receiver call completion, implicit function-result reference
+      filtering, and declaration-probe sampling that no longer treats
+      `type(name) :: var` as a derived-type definition.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
@@ -209,7 +207,7 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 | 10 | `jacobwilliams/Fortran-CSV-Module` | `/tmp/freight-csv-fixture` | Passes; covered statement-form `open`/`close` and imported parameter masking. |
 | 11 | `urbanjost/M_CLI2` | `/tmp/freight-m-cli2-fixture` | Passes; covered semicolon statements, whitespace-tolerant module procedure syntax, compact `doubleprecision`, intrinsic wrappers. |
 | 12 | `jacobwilliams/roots-fortran` | `/tmp/freight-roots-fixture` | Passes without code changes; small OO/numerical library shape. |
-| 13 | `modern-fortran/neural-fortran` | `/tmp/freight-neural-fixture` | Full 101-file fixture passes; covered `select rank`, submodule masking, constructor/type collisions, typed module functions, labeled blocks. |
+| 13 | `modern-fortran/neural-fortran` | `/tmp/freight-neural-fixture` | Full 101-file fixture passes; covered `select rank`, submodule masking, constructor/type collisions, typed module functions, labeled blocks, re-exported procedure signature help, implicit function-result reference filtering, and derived-type receiver call completion. |
 | 14 | `jacobwilliams/pyplot-fortran` | `/tmp/freight-pyplot-fixture` | Passes without code changes; preprocessed plotting-module coverage. |
 | 15 | `jacobwilliams/fortran-search-and-sort` | `/tmp/freight-search-sort-fixture` | Passes without code changes; include-heavy sorting-module coverage. |
 | 16 | `jacobwilliams/quadpack` | `/tmp/freight-quadpack-fixture` | Passes; covered include-wrapper diagnostic boundaries and `MOD_INCLUDE` template normalization. |

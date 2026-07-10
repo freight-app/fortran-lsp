@@ -1250,6 +1250,9 @@ impl Workspace {
         let mut locations = Vec::new();
         for (file_path, file) in &self.files {
             for range in identifier_occurrences(&file.source, &target_name) {
+                if implicit_function_result_assignment_reference(file, target, &range) {
+                    continue;
+                }
                 if self
                     .resolve_at(file_path, range.start, &target_name)
                     .is_some_and(|sym| SymbolKey::from_symbol(sym) == target_key)
@@ -1780,19 +1783,7 @@ impl Workspace {
                 let Some(remote_name) = use_visible_remote_name(use_stmt, name) else {
                     continue;
                 };
-                if let Some(sym) = self
-                    .by_name
-                    .get(&remote_name.to_ascii_lowercase())
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|(p, idx)| self.files.get(p).and_then(|f| f.symbols.get(*idx)))
-                    .find(|sym| {
-                        sym.scope
-                            .first()
-                            .is_some_and(|scope| scope.eq_ignore_ascii_case(&use_stmt.module))
-                            && self.is_module_export(sym)
-                    })
-                {
+                if let Some(sym) = self.find_module_export_symbol(&use_stmt.module, &remote_name) {
                     return Some(sym);
                 }
             }
@@ -4168,6 +4159,18 @@ impl Workspace {
     }
 
     fn find_module_export_symbol(&self, module: &str, name: &str) -> Option<&Symbol> {
+        self.find_module_export_symbol_inner(module, name, &mut HashSet::new())
+    }
+
+    fn find_module_export_symbol_inner<'a>(
+        &'a self,
+        module: &str,
+        name: &str,
+        visited: &mut HashSet<String>,
+    ) -> Option<&'a Symbol> {
+        if !visited.insert(module.to_ascii_lowercase()) {
+            return None;
+        }
         self.by_name
             .get(&name.to_ascii_lowercase())
             .into_iter()
@@ -4177,6 +4180,29 @@ impl Workspace {
                 sym.name.eq_ignore_ascii_case(name)
                     && module_export_scope_matches(&sym.scope, module)
                     && self.is_module_export(sym)
+            })
+            .or_else(|| self.find_reexported_module_symbol(module, name, visited))
+    }
+
+    fn find_reexported_module_symbol<'a>(
+        &'a self,
+        module: &str,
+        name: &str,
+        visited: &mut HashSet<String>,
+    ) -> Option<&'a Symbol> {
+        let module_sym = self.find_module(module)?;
+        let file = self.files.get(&module_sym.file)?;
+        file.uses
+            .iter()
+            .filter(|use_stmt| {
+                use_stmt.scope.len() == 1 && use_stmt.scope[0].eq_ignore_ascii_case(module)
+            })
+            .find_map(|use_stmt| {
+                if !module_use_associated_name_is_public(file, module, name) {
+                    return None;
+                }
+                let remote_name = use_visible_remote_name(use_stmt, name)?;
+                self.find_module_export_symbol_inner(&use_stmt.module, &remote_name, visited)
             })
     }
 
@@ -6393,7 +6419,9 @@ fn callable_completion_symbol(sym: &Symbol) -> bool {
 }
 
 fn call_statement_completion_symbol(file: &ParsedFile, sym: &Symbol) -> bool {
-    callable_completion_symbol(sym) || procedure_dummy_symbol(file, sym)
+    callable_completion_symbol(sym)
+        || procedure_dummy_symbol(file, sym)
+        || declared_type_name(sym).is_some()
 }
 
 fn is_module_procedure_link(sym: &Symbol) -> bool {
@@ -6411,6 +6439,32 @@ fn has_module_procedure_implementation_signature(sym: &Symbol) -> bool {
             .iter()
             .any(|part| part.eq_ignore_ascii_case("interface"))
         && (sym.is_module_procedure || signature_has_module_procedure_prefix(&sym.signature))
+}
+
+fn implicit_function_result_assignment_reference(
+    file: &ParsedFile,
+    target: &Symbol,
+    range: &Range,
+) -> bool {
+    if target.kind != SymbolKind::Function || target.result.is_some() || file.path != target.file {
+        return false;
+    }
+    let mut function_scope = target.scope.clone();
+    function_scope.push(target.name.clone());
+    if !scopes_equal_case_insensitive(&file.scope_at(range.start), &function_scope) {
+        return false;
+    }
+    let Some(line) = file.source.lines().nth(range.start.line) else {
+        return false;
+    };
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.get(target.name.len()..) else {
+        return false;
+    };
+    trimmed
+        .get(..target.name.len())
+        .is_some_and(|name| name.eq_ignore_ascii_case(&target.name))
+        && rest.trim_start().starts_with('=')
 }
 
 fn is_interface_module_procedure_prototype(sym: &Symbol) -> bool {
