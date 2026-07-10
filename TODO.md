@@ -66,10 +66,22 @@ Next useful work:
 
 - Project-mode request coverage now includes bounded definition probes, hover
   probes on real declaration positions, same-file free-form reference probes,
-  concrete call-site signature-help probes, and free-form call-statement
-  completion probes. Procedure dummy / callback call signatures and
-  fixed-form/cross-file reference policy remain under later modelling/debugging
-  work; add more request types only when they compare reliably.
+  implementation probes for ancestor `module subroutine` / `module function`
+  prototypes, concrete call-site signature-help probes, and free-form
+  call-statement completion probes. Procedure dummy / callback call signatures
+  and fixed-form/cross-file reference policy remain under later
+  modelling/debugging work; add more request types only when they compare
+  reliably.
+- Next point-1 sub-points, in order:
+  1. Stabilize full-project neural-fortran request probes: current full-project
+     run exposes non-implementation mismatches in example-program definition,
+     same-file references, signature-help labels, and completion probes.
+  2. Add rename probes on local declarations after the definition/reference
+     sampler is stable enough to avoid type-constructor and variable noise.
+  3. Add folding-range probes on modules, interfaces, submodules, and fixed-form
+     continuation-heavy files.
+  4. Add semantic-token probes with a small normalized token summary per file
+     before considering full token-array comparison.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
   fortls open-order noise, generated-template artifacts, and harness limits.
@@ -149,8 +161,13 @@ and run the deterministic harness for every completed point.
       help, references, completion, implementation, rename, folding, and
       semantic-token probes on real source positions. Keep each probe type
       gated only after it is stable against fortls open-order and timing noise.
-      Sampled declaration-position hover probes are now live and pass minpack +
-      ODEPACK; remaining request types are still open.
+      Sampled declaration-position hover probes, same-file free-form reference
+      probes, concrete call-site signature probes, call-statement completion
+      probes, and ancestor module-procedure implementation probes are now live;
+      minpack + ODEPACK pass. A neural-fortran submodule slice verifies
+      implementation probes; full neural-fortran still exposes broader
+      non-implementation request mismatches that should be handled before
+      adding rename/folding/semantic-token gates.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,

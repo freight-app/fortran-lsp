@@ -558,6 +558,66 @@ end submodule";
 }
 
 #[test]
+fn full_module_subroutine_submodules_link_to_ancestor_interface() {
+    let mut ws = Workspace::new();
+    let module = "module io\n\
+type :: reader\n\
+integer :: width\n\
+end type\n\
+interface reader\n\
+pure module function new_reader(width) result(res)\n\
+integer :: width\n\
+type(reader) :: res\n\
+end function\n\
+end interface\n\
+interface\n\
+module subroutine read_binary_file_1d(filename, dtype, nrec, array)\n\
+character(*) :: filename\n\
+integer :: dtype\n\
+integer :: nrec\n\
+real :: array(:)\n\
+end subroutine\n\
+end interface\n\
+end module";
+    let submodule = "submodule(io) io_impl\n\
+contains\n\
+pure module function new_reader(width) result(res)\n\
+integer :: width\n\
+type(reader) :: res\n\
+res%width = width\n\
+end function\n\
+module subroutine read_binary_file_1d(filename, dtype, nrec, array)\n\
+character(*) :: filename\n\
+integer :: dtype, nrec\n\
+real :: array(:)\n\
+end subroutine\n\
+end submodule";
+    ws.upsert_file(PathBuf::from("io.f90"), module);
+    ws.upsert_file(PathBuf::from("io_impl.f90"), submodule);
+
+    let implementation = ws
+        .implementation_location(Path::new("io.f90"), Position::new(11, 18), module)
+        .unwrap();
+    assert_eq!(implementation.file, PathBuf::from("io_impl.f90"));
+    assert_eq!(implementation.range.start, Position::new(7, 18));
+    let constructor_implementation = ws
+        .implementation_location(Path::new("io.f90"), Position::new(5, 21), module)
+        .unwrap();
+    assert_eq!(
+        constructor_implementation.file,
+        PathBuf::from("io_impl.f90")
+    );
+    assert_eq!(constructor_implementation.range.start, Position::new(2, 21));
+    let definition = ws
+        .definition(Path::new("io_impl.f90"), Position::new(7, 18), submodule)
+        .unwrap();
+    assert_eq!(definition.file, PathBuf::from("io.f90"));
+    assert_eq!(definition.selection_range.start, Position::new(11, 18));
+    let diagnostics = ws.diagnostics(Path::new("io_impl.f90"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
 fn used_module_procedure_prototypes_are_visible() {
     let mut ws = Workspace::new();
     let module = "module math\n\

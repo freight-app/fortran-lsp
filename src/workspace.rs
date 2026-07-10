@@ -1692,7 +1692,7 @@ impl Workspace {
     }
 
     fn module_procedure_prototype<'a>(&'a self, sym: &'a Symbol) -> Option<&'a Symbol> {
-        if !sym.is_module_procedure {
+        if !self.is_submodule_procedure_implementation(sym) {
             return None;
         }
         let submodule_name = sym.scope.first()?;
@@ -1714,10 +1714,10 @@ impl Workspace {
         if !matches!(
             prototype.kind,
             SymbolKind::Subroutine | SymbolKind::Function
-        ) || !prototype
-            .scope
-            .iter()
-            .any(|part| part.eq_ignore_ascii_case("interface"))
+        ) || !self
+            .files
+            .get(&prototype.file)
+            .is_some_and(|file| is_interface_module_procedure_prototype_in_file(file, prototype))
         {
             return None;
         }
@@ -1728,7 +1728,7 @@ impl Workspace {
             .flatten()
             .filter_map(|(p, idx)| self.files.get(p).and_then(|f| f.symbols.get(*idx)))
             .find(|candidate| {
-                candidate.is_module_procedure
+                self.is_submodule_procedure_implementation(candidate)
                     && candidate.name.eq_ignore_ascii_case(&prototype.name)
                     && candidate.scope.first().is_some_and(|submodule_name| {
                         self.submodule_ancestor_matches(submodule_name, module)
@@ -1749,6 +1749,21 @@ impl Workspace {
                         .ancestor
                         .as_deref()
                         .is_some_and(|ancestor| ancestor.eq_ignore_ascii_case(module))
+            })
+    }
+
+    fn is_submodule_procedure_implementation(&self, sym: &Symbol) -> bool {
+        has_module_procedure_implementation_signature(sym)
+            && sym.scope.first().is_some_and(|submodule_name| {
+                self.by_name
+                    .get(&submodule_name.to_ascii_lowercase())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|(p, idx)| self.files.get(p).and_then(|f| f.symbols.get(*idx)))
+                    .any(|candidate| {
+                        candidate.kind == SymbolKind::Submodule
+                            && candidate.name.eq_ignore_ascii_case(submodule_name)
+                    })
             })
     }
 
@@ -2411,7 +2426,11 @@ impl Workspace {
 
     fn submodule_diagnostics(&self, file: &ParsedFile) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for implementation in file.symbols.iter().filter(|sym| sym.is_module_procedure) {
+        for implementation in file
+            .symbols
+            .iter()
+            .filter(|sym| self.is_submodule_procedure_implementation(sym))
+        {
             if self.scope_has_unresolved_submodule_ancestor(file, &implementation.scope) {
                 continue;
             }
@@ -3333,12 +3352,10 @@ impl Workspace {
             .find(|sym| {
                 matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function)
                     && sym.name.eq_ignore_ascii_case(name)
-                    && sym.scope.len() >= 2
                     && sym.scope[0].eq_ignore_ascii_case(module)
-                    && sym
-                        .scope
-                        .iter()
-                        .any(|part| part.eq_ignore_ascii_case("interface"))
+                    && self.files.get(&sym.file).is_some_and(|file| {
+                        is_interface_module_procedure_prototype_in_file(file, sym)
+                    })
             })
     }
 
@@ -6385,6 +6402,15 @@ fn is_module_procedure_link(sym: &Symbol) -> bool {
             .signature
             .get(..sym.signature.len().min("module procedure".len()))
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("module procedure"))
+}
+
+fn has_module_procedure_implementation_signature(sym: &Symbol) -> bool {
+    matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function)
+        && !sym
+            .scope
+            .iter()
+            .any(|part| part.eq_ignore_ascii_case("interface"))
+        && (sym.is_module_procedure || signature_has_module_procedure_prefix(&sym.signature))
 }
 
 fn is_interface_module_procedure_prototype(sym: &Symbol) -> bool {
