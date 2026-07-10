@@ -67,17 +67,15 @@ Next useful work:
 - Project-mode request coverage now includes bounded definition probes, hover
   probes on real declaration positions, same-file free-form reference probes,
   implementation probes for ancestor `module subroutine` / `module function`
-  prototypes, concrete call-site signature-help probes, and free-form
-  call-statement completion probes. Procedure dummy / callback call signatures
-  and fixed-form/cross-file reference policy remain under later
-  modelling/debugging work; add more request types only when they compare
-  reliably.
+  prototypes, concrete call-site signature-help probes, free-form call-statement
+  completion probes, and same-file local declaration rename probes. Procedure
+  dummy / callback call signatures and fixed-form/cross-file reference policy
+  remain under later modelling/debugging work; add more request types only when
+  they compare reliably.
 - Next point-1 sub-points, in order:
-  1. Add rename probes on local declarations after the definition/reference
-     sampler is stable enough to avoid type-constructor and variable noise.
-  2. Add folding-range probes on modules, interfaces, submodules, and fixed-form
+  1. Add folding-range probes on modules, interfaces, submodules, and fixed-form
      continuation-heavy files.
-  3. Add semantic-token probes with a small normalized token summary per file
+  2. Add semantic-token probes with a small normalized token summary per file
      before considering full token-array comparison.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
@@ -160,12 +158,13 @@ and run the deterministic harness for every completed point.
       gated only after it is stable against fortls open-order and timing noise.
       Sampled declaration-position hover probes, same-file free-form reference
       probes, concrete call-site signature probes, call-statement completion
-      probes, and ancestor module-procedure implementation probes are now live;
-      minpack, ODEPACK, and full neural-fortran pass. Full neural-fortran
-      stabilization added coverage for re-exported procedure signature help,
-      derived-type receiver call completion, implicit function-result reference
-      filtering, and declaration-probe sampling that no longer treats
-      `type(name) :: var` as a derived-type definition.
+      probes, ancestor module-procedure implementation probes, and same-file
+      local declaration rename probes are now live; minpack, ODEPACK, and full
+      neural-fortran pass. Full neural-fortran stabilization added coverage for
+      re-exported procedure signature help, derived-type receiver call
+      completion, implicit function-result reference filtering, and
+      declaration-probe sampling that no longer treats `type(name) :: var` as a
+      derived-type definition.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
