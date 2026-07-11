@@ -80,7 +80,7 @@ Next useful work:
         declaration/reference pairs, normalized to line spans.
   - [x] Add project-mode selection-range probes for representative free-form
         declarations, call expressions, and fixed-form continuation blocks.
-  - [ ] Add project-mode code-action probes only where the fixture has a real
+  - [x] Add project-mode code-action probes only where the fixture has a real
         missing-import opportunity; otherwise keep code actions deterministic.
   - [ ] Re-run the full 18-project oracle sweep after the new request probes
         are stable on minpack, neural-fortran, and ODEPACK.
@@ -184,6 +184,8 @@ and run the deterministic harness for every completed point.
       Selection-range probes are now live for declarations, calls, and
       fixed-form continuation positions; Freight must return non-empty
       normalized range chains.
+      Code-action probes are now live via a project-local missing-import probe;
+      Freight must offer the native add-use quick fix for the indexed export.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
