@@ -24,8 +24,10 @@ workspace-level plan.
 - [x] Freight adapter tests cover LSP-shaped native responses.
 - [x] Deterministic JSON-RPC harness covers shared fortls behavior plus
       Freight-only native surfaces.
-- [x] Full 18-project oracle sweep passes with the stable project-mode timing
-      gate (`--diagnostic-quiet 5.0`).
+- [x] Full 18-project oracle sweep passed with the stable project-mode timing
+      gate (`--diagnostic-quiet 5.0`) before the latest request-probe expansion.
+- [ ] Expanded project-mode request-probe sweep is in progress. Current active
+      queue is tracked under point 1 and must finish before moving to point 2.
 - [x] Workspace-wide indexing: `refresh_flags` walks project + dep include
       roots and indexes every Fortran file (parallel parse via
       `Workspace::upsert_parsed`), so a single opened file resolves sibling
@@ -82,8 +84,25 @@ Next useful work:
         declarations, call expressions, and fixed-form continuation blocks.
   - [x] Add project-mode code-action probes only where the fixture has a real
         missing-import opportunity; otherwise keep code actions deterministic.
+  - [ ] Stabilize the expanded request probes on the current full-sweep
+        failures before continuing the sweep:
+        json-fortran is the active case; separate harness normalization
+        issues from real resolver/model gaps.
+        - Empty fortls/Freight highlight results should not fail the project
+          gate.
+        - `null` fortls rename results with an empty Freight edit list should
+          not fail the project gate.
+        - Same-file reference probes should avoid broad derived-type
+          declaration positions unless the model intentionally compares type
+          reference breadth.
+        - Signature-help gaps for concrete helper calls should become focused
+          regressions if they are real resolver gaps; procedure dummy/callback
+          cases stay in point 5.
   - [ ] Re-run the full 18-project oracle sweep after the new request probes
-        are stable on minpack, neural-fortran, and ODEPACK.
+        are stable on minpack, fftpack, stdlib, fpm, json-fortran,
+        neural-fortran, and ODEPACK.
+  - [ ] Record the expanded sweep result in the fixture table, including any
+        new harness filters and model regressions added during the run.
   - [ ] Close the duplicate "Project-mode request parity" item in the hardening
         cycle once these probes are live and documented here.
 - Add more production projects only when they exercise a new code shape.
