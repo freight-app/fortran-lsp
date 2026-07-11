@@ -26,8 +26,8 @@ workspace-level plan.
       Freight-only native surfaces.
 - [x] Full 18-project oracle sweep passed with the stable project-mode timing
       gate (`--diagnostic-quiet 5.0`) before the latest request-probe expansion.
-- [ ] Expanded project-mode request-probe sweep is in progress. Current active
-      queue is tracked under point 1 and must finish before moving to point 2.
+- [x] Expanded project-mode request-probe sweep passes across all 18 oracle
+      fixtures with the stable timing gate (`--diagnostic-quiet 5.0`).
 - [x] Workspace-wide indexing: `refresh_flags` walks project + dep include
       roots and indexes every Fortran file (parallel parse via
       `Workspace::upsert_parsed`), so a single opened file resolves sibling
@@ -84,10 +84,9 @@ Next useful work:
         declarations, call expressions, and fixed-form continuation blocks.
   - [x] Add project-mode code-action probes only where the fixture has a real
         missing-import opportunity; otherwise keep code actions deterministic.
-  - [ ] Stabilize the expanded request probes on the current full-sweep
+  - [x] Stabilize the expanded request probes on the current full-sweep
         failures before continuing the sweep:
-        json-fortran through roots now pass with the expanded probes;
-        neural-fortran is the next sweep fixture to run. Continue separating
+        all 18 fixtures now pass with the expanded probes. Continue separating
         harness normalization issues from real resolver/model gaps.
         - Empty fortls/Freight highlight results should not fail the project
           gate.
@@ -107,12 +106,12 @@ Next useful work:
           definition targets.
         - Project diagnostics fail on Freight-only diagnostics; fortls-only
           project diagnostics are treated as oracle noise.
-  - [ ] Re-run the full 18-project oracle sweep after the new request probes
+  - [x] Re-run the full 18-project oracle sweep after the new request probes
         are stable on minpack, fftpack, stdlib, fpm, json-fortran,
         neural-fortran, and ODEPACK.
-  - [ ] Record the expanded sweep result in the fixture table, including any
+  - [x] Record the expanded sweep result in the fixture table, including any
         new harness filters and model regressions added during the run.
-  - [ ] Close the duplicate "Project-mode request parity" item in the hardening
+  - [x] Close the duplicate "Project-mode request parity" item in the hardening
         cycle once these probes are live and documented here.
 - Add more production projects only when they exercise a new code shape.
 - Convert mismatches into narrow parser/workspace rules only after ruling out
@@ -188,7 +187,7 @@ replacement in normal freight projects" to "hard to distinguish from fortls on
 large and unusual Fortran codebases". Work them one at a time; add a regression
 and run the deterministic harness for every completed point.
 
-- [ ] Project-mode request parity beyond symbols/diagnostics. Extend
+- [x] Project-mode request parity beyond symbols/diagnostics. Extend
       `scripts/fortran_lsp_compare.py --project` with sampled hover, signature
       help, references, completion, implementation, rename, folding, and
       semantic-token probes on real source positions. Keep each probe type
@@ -214,6 +213,10 @@ and run the deterministic harness for every completed point.
       normalized range chains.
       Code-action probes are now live via a project-local missing-import probe;
       Freight must offer the native add-use quick fix for the indexed export.
+      The expanded 18-project sweep passes with these gates; project-mode
+      diagnostics, definitions, hover, signatures, rename, and completion now
+      treat fortls as an availability oracle where fortls has known missing or
+      overbroad behavior.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,

@@ -1054,7 +1054,7 @@ impl Workspace {
         for sym in &file.symbols {
             if call_statement_completion_symbol(file, sym)
                 && sym.name.to_ascii_lowercase().starts_with(prefix)
-                && visible_scope_match_len(&current_scope, &sym.scope).is_some()
+                && call_completion_scope_visible(file, &current_scope, sym, &sym.scope)
             {
                 items.insert(sym.name.clone(), CompletionItem::from_symbol(sym));
             }
@@ -1063,7 +1063,12 @@ impl Workspace {
             let sym = included.symbol;
             if call_statement_completion_symbol(file, sym)
                 && sym.name.to_ascii_lowercase().starts_with(prefix)
-                && visible_scope_match_len(&current_scope, &included.effective_scope).is_some()
+                && call_completion_scope_visible(
+                    file,
+                    &current_scope,
+                    sym,
+                    &included.effective_scope,
+                )
             {
                 items.insert(sym.name.clone(), CompletionItem::from_symbol(sym));
             }
@@ -6453,6 +6458,44 @@ fn call_statement_completion_symbol(file: &ParsedFile, sym: &Symbol) -> bool {
     callable_completion_symbol(sym)
         || procedure_dummy_symbol(file, sym)
         || declared_type_name(sym).is_some()
+}
+
+fn call_completion_scope_visible(
+    file: &ParsedFile,
+    current_scope: &[String],
+    sym: &Symbol,
+    symbol_scope: &[String],
+) -> bool {
+    if visible_scope_match_len(current_scope, symbol_scope).is_some() {
+        return true;
+    }
+    interface_prototype_host_scope(file, sym, symbol_scope)
+        .is_some_and(|host_scope| visible_scope_match_len(current_scope, host_scope).is_some())
+}
+
+fn interface_prototype_host_scope<'a>(
+    file: &'a ParsedFile,
+    sym: &Symbol,
+    symbol_scope: &'a [String],
+) -> Option<&'a [String]> {
+    if !matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function) {
+        return None;
+    }
+    let interface_idx = symbol_scope
+        .iter()
+        .rposition(|part| part.eq_ignore_ascii_case("interface"))
+        .or_else(|| {
+            let (interface_name, host_scope) = symbol_scope.split_last()?;
+            file.symbols
+                .iter()
+                .any(|candidate| {
+                    candidate.kind == SymbolKind::Interface
+                        && candidate.name.eq_ignore_ascii_case(interface_name)
+                        && scopes_equal(&candidate.scope, host_scope)
+                })
+                .then_some(host_scope.len())
+        })?;
+    symbol_scope.get(..interface_idx)
 }
 
 fn is_module_procedure_link(sym: &Symbol) -> bool {

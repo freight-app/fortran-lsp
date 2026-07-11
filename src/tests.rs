@@ -2646,7 +2646,7 @@ end program";
     let signature = ws
         .signature_help(Path::new("app.f90"), Position::new(16, 12), src)
         .unwrap();
-    assert_eq!(signature.label, "subroutine set_pair(x, y)");
+    assert_eq!(signature.label, "set_pair(x, y)");
     assert_eq!(signature.parameters, vec!["x", "y"]);
     assert_eq!(signature.active_parameter, 1);
 
@@ -7392,6 +7392,30 @@ end program main";
             .iter()
             .all(|diag| !diag.message.contains("call to `atan`")),
         "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn call_completion_includes_local_interface_prototypes() {
+    let mut ws = Workspace::new();
+    let source = "module m\n\
+contains\n\
+subroutine linear_solver()\n\
+  interface\n\
+    subroutine dgesv(n, info)\n\
+      integer :: n\n\
+      integer :: info\n\
+    end subroutine dgesv\n\
+  end interface\n\
+  call dge\n\
+end subroutine linear_solver\n\
+end module m";
+    ws.upsert_file(PathBuf::from("m.f90"), source);
+
+    let completions = ws.completions_at(Path::new("m.f90"), Position::new(9, 10), "dge");
+    assert!(
+        completions.iter().any(|item| item.label == "dgesv"),
+        "{completions:?}"
     );
 }
 
