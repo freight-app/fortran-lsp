@@ -86,8 +86,8 @@ Next useful work:
         missing-import opportunity; otherwise keep code actions deterministic.
   - [ ] Stabilize the expanded request probes on the current full-sweep
         failures before continuing the sweep:
-        json-fortran, test-drive, toml-f, and FAT now pass with the expanded
-        probes; bspline is the next sweep fixture to run. Continue separating
+        json-fortran through roots now pass with the expanded probes;
+        neural-fortran is the next sweep fixture to run. Continue separating
         harness normalization issues from real resolver/model gaps.
         - Empty fortls/Freight highlight results should not fail the project
           gate.
@@ -105,6 +105,8 @@ Next useful work:
         - Top-level docs/example package trees are not used for request probes
           because duplicate vendored source copies create non-deterministic
           definition targets.
+        - Project diagnostics fail on Freight-only diagnostics; fortls-only
+          project diagnostics are treated as oracle noise.
   - [ ] Re-run the full 18-project oracle sweep after the new request probes
         are stable on minpack, fftpack, stdlib, fpm, json-fortran,
         neural-fortran, and ODEPACK.
