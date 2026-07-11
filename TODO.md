@@ -76,7 +76,7 @@ Next useful work:
 - Next point-1 sub-points, in order:
   - [x] Add project-mode semantic-token probes with a small normalized token
         summary per file before considering full token-array comparison.
-  - [ ] Add project-mode document-highlight probes on sampled same-file
+  - [x] Add project-mode document-highlight probes on sampled same-file
         declaration/reference pairs, normalized to line spans.
   - [ ] Add project-mode selection-range probes for representative free-form
         declarations, call expressions, and fixed-form continuation blocks.
@@ -178,6 +178,9 @@ and run the deterministic harness for every completed point.
       Semantic-token probes are now live with capped normalized summaries
       (token count, valid token count, covered lines, token-type histogram);
       minpack, ODEPACK, and full neural-fortran pass.
+      Document-highlight probes are now live on unambiguous local declarations;
+      Freight highlight lines must be non-empty and accepted by fortls, while
+      fortls-only surrounding/context lines are not required.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
