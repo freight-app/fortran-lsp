@@ -346,6 +346,15 @@ impl ParsedFile {
     pub fn symbol_at(&self, pos: Position) -> Option<&Symbol> {
         let word = word_at_source(&self.source, pos)?;
         let current_scope = self.scope_at(pos);
+        if let Some(sym) = self
+            .symbols
+            .iter()
+            .filter(|sym| sym.name.eq_ignore_ascii_case(&word))
+            .filter(|sym| sym.selection_range.contains(pos))
+            .max_by_key(|sym| sym.scope.len())
+        {
+            return Some(sym);
+        }
         self.symbols
             .iter()
             .filter(|sym| sym.name.eq_ignore_ascii_case(&word))

@@ -1253,9 +1253,31 @@ impl Workspace {
                 if implicit_function_result_assignment_reference(file, target, &range) {
                     continue;
                 }
-                if self
-                    .resolve_at(file_path, range.start, &target_name)
-                    .is_some_and(|sym| SymbolKey::from_symbol(sym) == target_key)
+                let Some(resolved) = self.resolve_at(file_path, range.start, &target_name) else {
+                    continue;
+                };
+                let member_target_matches = resolved.kind == SymbolKind::Method
+                    && self
+                        .method_target_symbol(resolved)
+                        .is_some_and(|method_target| {
+                            SymbolKey::from_symbol(method_target) == target_key
+                        });
+                if target.kind != SymbolKind::Method
+                    && occurrence_is_member_selector(file, &range)
+                    && SymbolKey::from_symbol(resolved) != target_key
+                    && !member_target_matches
+                {
+                    continue;
+                }
+                if SymbolKey::from_symbol(resolved) == target_key
+                    || member_target_matches
+                    || (is_module_procedure_link(resolved)
+                        && resolved.name.eq_ignore_ascii_case(&target.name)
+                        && resolved
+                            .scope
+                            .first()
+                            .zip(target.scope.first())
+                            .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right)))
                 {
                     locations.push(Location {
                         file: file_path.clone(),
@@ -1801,6 +1823,15 @@ impl Workspace {
 
     fn resolve_at(&self, path: &Path, pos: Position, name: &str) -> Option<&Symbol> {
         if let Some(file) = self.files.get(path) {
+            if let Some(access) = member_access_at_source(&file.source, pos) {
+                if access.member.eq_ignore_ascii_case(name) {
+                    if let Some(method) =
+                        self.find_member_method(path, &access.receiver, &access.member)
+                    {
+                        return self.method_target_symbol(method).or(Some(method));
+                    }
+                }
+            }
             if let Some(sym) = file.symbol_at(pos) {
                 return Some(sym);
             }
@@ -5824,7 +5855,7 @@ fn is_parenthesized_statement_name(name: &str) -> bool {
 fn is_lenient_intrinsic_call_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "all" | "any" | "max" | "min"
+        "all" | "any" | "atan" | "max" | "min"
     )
 }
 
@@ -6467,13 +6498,13 @@ fn implicit_function_result_assignment_reference(
         && rest.trim_start().starts_with('=')
 }
 
-fn is_interface_module_procedure_prototype(sym: &Symbol) -> bool {
-    matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function)
-        && sym
-            .scope
-            .iter()
-            .any(|part| part.eq_ignore_ascii_case("interface"))
-        && signature_has_module_procedure_prefix(&sym.signature)
+fn occurrence_is_member_selector(file: &ParsedFile, range: &Range) -> bool {
+    let Some(line) = file.source.lines().nth(range.start.line) else {
+        return false;
+    };
+    let byte_idx = byte_idx_for_utf16_col(line, range.start.character);
+    line.get(..byte_idx)
+        .is_some_and(|before| before.trim_end().ends_with('%'))
 }
 
 fn is_interface_module_procedure_prototype_in_file(file: &ParsedFile, sym: &Symbol) -> bool {
@@ -6532,7 +6563,7 @@ fn procedure_signature_matches_keyword(procedure: &Symbol, active_keyword: Optio
 }
 
 fn procedure_signature_label(sym: &Symbol) -> String {
-    if is_interface_module_procedure_prototype(sym) {
+    if matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function) && !sym.args.is_empty() {
         return format!("{}({})", sym.name, sym.args.join(", "));
     }
     sym.signature.clone()

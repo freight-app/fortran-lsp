@@ -86,8 +86,9 @@ Next useful work:
         missing-import opportunity; otherwise keep code actions deterministic.
   - [ ] Stabilize the expanded request probes on the current full-sweep
         failures before continuing the sweep:
-        json-fortran is the active case; separate harness normalization
-        issues from real resolver/model gaps.
+        json-fortran, test-drive, toml-f, and FAT now pass with the expanded
+        probes; bspline is the next sweep fixture to run. Continue separating
+        harness normalization issues from real resolver/model gaps.
         - Empty fortls/Freight highlight results should not fail the project
           gate.
         - `null` fortls rename results with an empty Freight edit list should
@@ -98,6 +99,12 @@ Next useful work:
         - Signature-help gaps for concrete helper calls should become focused
           regressions if they are real resolver gaps; procedure dummy/callback
           cases stay in point 5.
+        - Fortls rename edits are only an availability oracle in project mode;
+          Freight's scoped rename may be narrower than fortls's same-name
+          same-file edits.
+        - Top-level docs/example package trees are not used for request probes
+          because duplicate vendored source copies create non-deterministic
+          definition targets.
   - [ ] Re-run the full 18-project oracle sweep after the new request probes
         are stable on minpack, fftpack, stdlib, fpm, json-fortran,
         neural-fortran, and ODEPACK.

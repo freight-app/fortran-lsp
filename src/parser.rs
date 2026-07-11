@@ -3686,7 +3686,7 @@ pub(crate) struct CallContext {
 }
 
 pub(crate) fn call_context(source: &str, pos: Position) -> Option<CallContext> {
-    let prefix = source_prefix(source, pos)?;
+    let prefix = call_context_prefix(source, pos)?;
     let open = find_unclosed_call_paren(&prefix)?;
     let before = prefix[..open].trim_end();
     let name_end = before.len();
@@ -3708,6 +3708,47 @@ pub(crate) fn call_context(source: &str, pos: Position) -> Option<CallContext> {
         active_argument_name: active_keyword_argument(&prefix[open + 1..]),
         argument_count: count_call_arguments(&prefix[open + 1..]),
     })
+}
+
+fn call_context_prefix(source: &str, pos: Position) -> Option<String> {
+    let mut current = String::new();
+    for (line_no, line) in source.lines().enumerate() {
+        if line_no > pos.line {
+            break;
+        }
+        let raw = if line_no == pos.line {
+            let byte_character = byte_idx_for_utf16_col(line, pos.character);
+            line.get(..byte_character.min(line.len()))?
+        } else {
+            line
+        };
+        let code = strip_inline_comment(raw);
+        let trimmed = code.trim_end();
+        if trimmed.trim().is_empty() {
+            if current.is_empty() {
+                continue;
+            }
+            if line_no == pos.line {
+                break;
+            }
+            continue;
+        }
+        let continued = trimmed.ends_with('&');
+        let part = trimmed.trim_end_matches('&').trim_end();
+        if current.is_empty() {
+            current.push_str(part.trim_start_matches('&').trim_start());
+        } else {
+            current.push(' ');
+            current.push_str(part.trim_start_matches('&').trim_start());
+        }
+        if line_no == pos.line {
+            break;
+        }
+        if !continued {
+            current.clear();
+        }
+    }
+    (!current.is_empty()).then_some(current)
 }
 
 fn member_access_before(line: &str, member_start: usize, member: &str) -> Option<MemberAccess> {
@@ -3732,23 +3773,6 @@ fn member_access_before(line: &str, member_start: usize, member: &str) -> Option
         receiver: receiver.to_string(),
         member: member.to_string(),
     })
-}
-
-fn source_prefix(source: &str, pos: Position) -> Option<String> {
-    let mut out = String::new();
-    for (line_no, line) in source.lines().enumerate() {
-        if line_no > pos.line {
-            break;
-        }
-        if line_no == pos.line {
-            let byte_character = byte_idx_for_utf16_col(line, pos.character);
-            out.push_str(line.get(..byte_character.min(line.len()))?);
-            break;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    Some(out)
 }
 
 fn find_unclosed_call_paren(prefix: &str) -> Option<usize> {

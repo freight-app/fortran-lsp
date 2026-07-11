@@ -618,6 +618,48 @@ end submodule";
 }
 
 #[test]
+fn pure_module_function_implementation_links_from_type_bound_interface() {
+    let mut ws = Workspace::new();
+    let module = "module stdlib_hashmaps\n\
+type :: hashmap_type\n\
+end type\n\
+type, extends(hashmap_type) :: chaining_hashmap_type\n\
+contains\n\
+  procedure :: loading => chaining_loading\n\
+end type\n\
+interface\n\
+  pure module function chaining_loading(map)\n\
+    class(chaining_hashmap_type), intent(in) :: map\n\
+    real :: chaining_loading\n\
+  end function chaining_loading\n\
+end interface\n\
+end module";
+    let submodule = "submodule(stdlib_hashmaps) stdlib_hashmap_chaining\n\
+contains\n\
+  pure module function chaining_loading(map)\n\
+    class(chaining_hashmap_type), intent(in) :: map\n\
+    real :: chaining_loading\n\
+    chaining_loading = 1.0\n\
+  end function chaining_loading\n\
+end submodule";
+    ws.upsert_file(PathBuf::from("stdlib_hashmaps.f90"), module);
+    ws.upsert_file(PathBuf::from("stdlib_hashmap_chaining.f90"), submodule);
+
+    let implementation = ws
+        .implementation_location(
+            Path::new("stdlib_hashmaps.f90"),
+            Position::new(8, 23),
+            module,
+        )
+        .expect("module function implementation");
+    assert_eq!(
+        implementation.file,
+        PathBuf::from("stdlib_hashmap_chaining.f90")
+    );
+    assert_eq!(implementation.range.start, Position::new(2, 21));
+}
+
+#[test]
 fn used_module_procedure_prototypes_are_visible() {
     let mut ws = Workspace::new();
     let module = "module math\n\
@@ -7138,6 +7180,219 @@ end module";
     assert!(!refs
         .iter()
         .any(|loc| loc.file == PathBuf::from("app.f90") && loc.range.start.line == 7));
+}
+
+#[test]
+fn references_skip_type_bound_member_selectors_for_same_named_local_function() {
+    let mut ws = Workspace::new();
+    let source = "program example\n\
+type :: bitset_large\n\
+contains\n\
+  procedure :: to_string => bitset_to_string\n\
+end type\n\
+type(bitset_large) :: bitset\n\
+contains\n\
+function to_string(bitset) result(str)\n\
+  type(bitset_large), intent(in) :: bitset\n\
+  character(:), allocatable :: str\n\
+  call bitset%to_string(str)\n\
+end function to_string\n\
+subroutine bitset_to_string(self, str)\n\
+  class(bitset_large), intent(in) :: self\n\
+  character(:), allocatable, intent(out) :: str\n\
+end subroutine bitset_to_string\n\
+end program example";
+    ws.upsert_file(PathBuf::from("example.f90"), source);
+
+    let refs = ws.references(Path::new("example.f90"), Position::new(7, 10), source);
+    assert!(refs.iter().any(|loc| loc.range.start.line == 7));
+    assert!(refs.iter().any(|loc| loc.range.start.line == 11));
+    assert!(
+        refs.iter().all(|loc| loc.range.start.line != 10),
+        "member selector was treated as local function reference: {refs:?}"
+    );
+}
+
+#[test]
+fn references_find_forward_internal_function_calls_before_contains() {
+    let mut ws = Workspace::new();
+    let source = "program main\n\
+logical :: ok\n\
+if (.not.has_manifest(\".\")) ok = .false.\n\
+if (has_manifest(\".\")) ok = .true.\n\
+contains\n\
+function has_manifest(dir)\n\
+  character(len=*), intent(in) :: dir\n\
+  logical :: has_manifest\n\
+  has_manifest = .true.\n\
+end function has_manifest\n\
+end program main";
+    ws.upsert_file(PathBuf::from("main.f90"), source);
+
+    let refs = ws.references(Path::new("main.f90"), Position::new(5, 9), source);
+    let lines: Vec<_> = refs.iter().map(|loc| loc.range.start.line).collect();
+    assert!(lines.contains(&2), "missing first forward call: {refs:?}");
+    assert!(lines.contains(&3), "missing second forward call: {refs:?}");
+    assert!(lines.contains(&5), "missing declaration: {refs:?}");
+}
+
+#[test]
+fn references_include_type_bound_procedure_binding_links() {
+    let mut ws = Workspace::new();
+    let source = "module m\n\
+type :: t\n\
+contains\n\
+  procedure :: initialize\n\
+end type\n\
+contains\n\
+subroutine initialize(self)\n\
+  class(t), intent(inout) :: self\n\
+end subroutine initialize\n\
+subroutine run(obj)\n\
+  type(t), intent(inout) :: obj\n\
+  call obj%initialize()\n\
+end subroutine run\n\
+end module m";
+    ws.upsert_file(PathBuf::from("m.f90"), source);
+
+    let refs = ws.references(Path::new("m.f90"), Position::new(6, 12), source);
+    let lines: Vec<_> = refs.iter().map(|loc| loc.range.start.line).collect();
+    assert!(
+        lines.contains(&3),
+        "missing type-bound procedure link: {refs:?}"
+    );
+    assert!(
+        lines.contains(&6),
+        "missing implementation declaration: {refs:?}"
+    );
+    assert!(
+        lines.contains(&11),
+        "missing type-bound member call: {refs:?}"
+    );
+}
+
+#[test]
+fn references_include_generic_module_procedure_links() {
+    let mut ws = Workspace::new();
+    let source = "module m\n\
+interface make_t\n\
+  module procedure make_t_from_i, make_t_from_r\n\
+end interface\n\
+contains\n\
+function make_t_from_i(i) result(out)\n\
+  integer, intent(in) :: i\n\
+  integer :: out\n\
+  out = i\n\
+end function make_t_from_i\n\
+function make_t_from_r(r) result(out)\n\
+  real, intent(in) :: r\n\
+  integer :: out\n\
+  out = int(r)\n\
+end function make_t_from_r\n\
+end module m";
+    ws.upsert_file(PathBuf::from("m.f90"), source);
+
+    let refs = ws.references(Path::new("m.f90"), Position::new(5, 9), source);
+    let lines: Vec<_> = refs.iter().map(|loc| loc.range.start.line).collect();
+    assert!(
+        lines.contains(&2),
+        "missing module procedure link: {refs:?}"
+    );
+    assert!(
+        lines.contains(&5),
+        "missing implementation declaration: {refs:?}"
+    );
+}
+
+#[test]
+fn signature_help_resolves_prefixed_same_module_imported_and_recursive_subroutines() {
+    let mut ws = Workspace::new();
+    let utilities = "module utilities\n\
+private\n\
+public :: replace_string\n\
+contains\n\
+pure subroutine replace_string(str, s1, s2)\n\
+  character(len=*), intent(inout) :: str\n\
+  character(len=*), intent(in) :: s1\n\
+  character(len=*), intent(in) :: s2\n\
+end subroutine replace_string\n\
+end module utilities";
+    let main = "module main\n\
+use utilities\n\
+contains\n\
+pure function encode(str) result(out)\n\
+  character(len=*), intent(in) :: str\n\
+  character(len=:), allocatable :: out\n\
+  out = str\n\
+  call replace_string(out, CK_'~', CK_'~0')\n\
+end function encode\n\
+recursive subroutine clone(from, to, parent)\n\
+  integer, intent(in) :: from\n\
+  integer, intent(out) :: to\n\
+  integer, intent(in), optional :: parent\n\
+  call clone(from = from,&\n\
+             to = to,&\n\
+             parent = parent)\n\
+end subroutine clone\n\
+end module main";
+    ws.upsert_file(PathBuf::from("utilities.f90"), utilities);
+    ws.upsert_file(PathBuf::from("main.f90"), main);
+
+    let imported = ws
+        .signature_help(Path::new("main.f90"), Position::new(7, 22), main)
+        .expect("imported pure subroutine signature");
+    assert_eq!(imported.label, "replace_string(str, s1, s2)");
+    assert_eq!(imported.parameters, vec!["str", "s1", "s2"]);
+
+    let recursive = ws
+        .signature_help(Path::new("main.f90"), Position::new(13, 14), main)
+        .expect("recursive subroutine signature");
+    assert_eq!(recursive.label, "clone(from, to, parent)");
+    assert_eq!(recursive.parameters, vec!["from", "to", "parent"]);
+}
+
+#[test]
+fn signature_help_ignores_unmatched_comment_punctuation_before_call() {
+    let mut ws = Workspace::new();
+    let source = "module m\n\
+! documentation mentions f(unclosed and should not affect calls\n\
+contains\n\
+subroutine target(a, b, c)\n\
+  integer, intent(in) :: a\n\
+  integer, intent(in) :: b\n\
+  integer, intent(in) :: c\n\
+end subroutine target\n\
+subroutine caller()\n\
+  call target(a = 1,&\n\
+              b = 2,&\n\
+              c = 3)\n\
+end subroutine caller\n\
+end module m";
+    ws.upsert_file(PathBuf::from("m.f90"), source);
+
+    let help = ws
+        .signature_help(Path::new("m.f90"), Position::new(10, 16), source)
+        .expect("continued call signature");
+    assert_eq!(help.label, "target(a, b, c)");
+    assert_eq!(help.parameters, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn diagnostics_accept_two_argument_atan_intrinsic() {
+    let mut ws = Workspace::new();
+    let source = "program main\n\
+real :: y, x, theta\n\
+theta = atan(y, x)\n\
+end program main";
+    ws.upsert_file(PathBuf::from("main.f90"), source);
+
+    let diagnostics = ws.diagnostics(Path::new("main.f90"));
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diag| !diag.message.contains("call to `atan`")),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
