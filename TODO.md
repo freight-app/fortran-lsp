@@ -78,7 +78,7 @@ Next useful work:
         summary per file before considering full token-array comparison.
   - [x] Add project-mode document-highlight probes on sampled same-file
         declaration/reference pairs, normalized to line spans.
-  - [ ] Add project-mode selection-range probes for representative free-form
+  - [x] Add project-mode selection-range probes for representative free-form
         declarations, call expressions, and fixed-form continuation blocks.
   - [ ] Add project-mode code-action probes only where the fixture has a real
         missing-import opportunity; otherwise keep code actions deterministic.
@@ -181,6 +181,9 @@ and run the deterministic harness for every completed point.
       Document-highlight probes are now live on unambiguous local declarations;
       Freight highlight lines must be non-empty and accepted by fortls, while
       fortls-only surrounding/context lines are not required.
+      Selection-range probes are now live for declarations, calls, and
+      fixed-form continuation positions; Freight must return non-empty
+      normalized range chains.
 - [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
