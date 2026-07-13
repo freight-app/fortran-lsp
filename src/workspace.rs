@@ -1319,43 +1319,54 @@ impl Workspace {
             return Vec::new();
         };
         let target_key = SymbolKey::from_symbol(target);
-        let target_name = target.name.clone();
+        let mut target_names = vec![target.name.clone()];
+        for method in self.method_bindings_for_target(target) {
+            if !target_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&method.name))
+            {
+                target_names.push(method.name.clone());
+            }
+        }
         let mut locations = Vec::new();
         for (file_path, file) in &self.files {
-            for range in identifier_occurrences(&file.source, &target_name) {
-                if implicit_function_result_assignment_reference(file, target, &range) {
-                    continue;
-                }
-                let Some(resolved) = self.resolve_at(file_path, range.start, &target_name) else {
-                    continue;
-                };
-                let member_target_matches = resolved.kind == SymbolKind::Method
-                    && self
-                        .method_target_symbol(resolved)
-                        .is_some_and(|method_target| {
-                            SymbolKey::from_symbol(method_target) == target_key
+            for target_name in &target_names {
+                for range in identifier_occurrences(&file.source, target_name) {
+                    if implicit_function_result_assignment_reference(file, target, &range) {
+                        continue;
+                    }
+                    let Some(resolved) = self.resolve_at(file_path, range.start, target_name)
+                    else {
+                        continue;
+                    };
+                    let member_target_matches = resolved.kind == SymbolKind::Method
+                        && self
+                            .method_target_symbol(resolved)
+                            .is_some_and(|method_target| {
+                                SymbolKey::from_symbol(method_target) == target_key
+                            });
+                    if target.kind != SymbolKind::Method
+                        && occurrence_is_member_selector(file, &range)
+                        && SymbolKey::from_symbol(resolved) != target_key
+                        && !member_target_matches
+                    {
+                        continue;
+                    }
+                    if SymbolKey::from_symbol(resolved) == target_key
+                        || member_target_matches
+                        || (is_module_procedure_link(resolved)
+                            && resolved.name.eq_ignore_ascii_case(&target.name)
+                            && resolved
+                                .scope
+                                .first()
+                                .zip(target.scope.first())
+                                .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right)))
+                    {
+                        locations.push(Location {
+                            file: file_path.clone(),
+                            range,
                         });
-                if target.kind != SymbolKind::Method
-                    && occurrence_is_member_selector(file, &range)
-                    && SymbolKey::from_symbol(resolved) != target_key
-                    && !member_target_matches
-                {
-                    continue;
-                }
-                if SymbolKey::from_symbol(resolved) == target_key
-                    || member_target_matches
-                    || (is_module_procedure_link(resolved)
-                        && resolved.name.eq_ignore_ascii_case(&target.name)
-                        && resolved
-                            .scope
-                            .first()
-                            .zip(target.scope.first())
-                            .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right)))
-                {
-                    locations.push(Location {
-                        file: file_path.clone(),
-                        range,
-                    });
+                    }
                 }
             }
         }
@@ -1390,6 +1401,16 @@ impl Workspace {
                 };
                 let token_type = self.semantic_token_type_for_symbol(sym);
                 insert_semantic_token(&mut tokens, range, token_type);
+            }
+        }
+        for generic in &file.generic_bindings {
+            for range in identifier_occurrences(&file.source, &generic.name) {
+                if range.start.line == generic.range.start.line
+                    && generic.range.contains(range.start)
+                {
+                    insert_semantic_token(&mut tokens, range, semantic_token_type::METHOD);
+                    break;
+                }
             }
         }
         for directive in &file.preprocessor {
@@ -3460,6 +3481,21 @@ impl Workspace {
         self.find_procedure_in_scope(parent_scope, target)
             .or_else(|| self.find_procedure_in_host_interfaces(parent_scope, target))
             .or_else(|| self.method_interface_prototype(method))
+    }
+
+    fn method_bindings_for_target<'a>(&'a self, target: &'a Symbol) -> Vec<&'a Symbol> {
+        let target_key = SymbolKey::from_symbol(target);
+        self.files
+            .values()
+            .flat_map(|file| file.symbols.iter())
+            .filter(|sym| sym.kind == SymbolKind::Method)
+            .filter(|method| {
+                self.method_target_symbol(method)
+                    .is_some_and(|method_target| {
+                        SymbolKey::from_symbol(method_target) == target_key
+                    })
+            })
+            .collect()
     }
 
     fn method_interface_prototype<'a>(&'a self, method: &'a Symbol) -> Option<&'a Symbol> {

@@ -242,10 +242,16 @@ and run the deterministic harness for every completed point.
       dummy declarations for ordinary and type-bound generics. Optional and
       keyword compatibility remains the gate, and ambiguous type scores fall
       back to the older non-type selector instead of guessing.
-- [ ] Semantic-token, folding, and document-highlight audit. Compare Freight's
+- [x] Semantic-token, folding, and document-highlight audit. Compare Freight's
       native editor-only surfaces against real projects and editor snapshots:
       preprocessor tokens, type-bound bindings, generic interfaces,
       submodules, labels, fixed-form continuations, and include-grafted symbols.
+      Added focused semantic-token coverage for preprocessor macros,
+      type-bound bindings/generics, generic `module procedure` links, and
+      submodule procedure implementations. Freight adapter coverage now checks
+      document highlights and folding ranges for type-bound/generic/interface
+      shapes. Fixed semantic tokens for named generic bindings and highlights
+      for type-bound method aliases that target an implementation.
 - [ ] Incremental dependency invalidation. Measure large-project edits in
       stdlib/fpm/ODEPACK, then cache include/module dependency edges so edits
       to included files or exported module APIs re-index only affected

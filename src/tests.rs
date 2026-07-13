@@ -2369,6 +2369,80 @@ end module";
 }
 
 #[test]
+fn semantic_tokens_cover_editor_surface_audit_shapes() {
+    let mut ws = Workspace::new();
+    let parent = "module parent\n\
+#define SIZE 4\n\
+type :: vector\n\
+contains\n\
+  procedure :: scale => scale_vector\n\
+  generic :: apply => scale\n\
+end type\n\
+interface make\n\
+module procedure make_vector\n\
+end interface\n\
+interface\n\
+module subroutine deferred_scale(self)\n\
+class(vector) :: self\n\
+end subroutine\n\
+end interface\n\
+contains\n\
+function make_vector() result(v)\n\
+type(vector) :: v\n\
+end function\n\
+subroutine scale_vector(self, factor)\n\
+class(vector) :: self\n\
+real :: factor(SIZE)\n\
+end subroutine\n\
+end module";
+    let child = "submodule(parent) child\n\
+contains\n\
+module procedure deferred_scale\n\
+end procedure\n\
+end submodule";
+    ws.upsert_file(PathBuf::from("parent.F90"), parent);
+    ws.upsert_file(PathBuf::from("child.f90"), child);
+
+    let parent_tokens = ws.semantic_tokens(Path::new("parent.F90"));
+    assert_eq!(
+        token_type_at(parent, &parent_tokens, "#define SIZE", "SIZE"),
+        Some(semantic_token_type::MACRO)
+    );
+    assert_eq!(
+        token_type_at(parent, &parent_tokens, "procedure :: scale", "scale"),
+        Some(semantic_token_type::METHOD)
+    );
+    assert_eq!(
+        token_type_at(parent, &parent_tokens, "generic :: apply", "apply"),
+        Some(semantic_token_type::METHOD)
+    );
+    assert_eq!(
+        token_type_at(
+            parent,
+            &parent_tokens,
+            "module procedure make_vector",
+            "make_vector"
+        ),
+        Some(semantic_token_type::FUNCTION)
+    );
+
+    let child_tokens = ws.semantic_tokens(Path::new("child.f90"));
+    assert_eq!(
+        token_type_at(child, &child_tokens, "submodule(parent) child", "child"),
+        Some(semantic_token_type::NAMESPACE)
+    );
+    assert_eq!(
+        token_type_at(
+            child,
+            &child_tokens,
+            "module procedure deferred_scale",
+            "deferred_scale"
+        ),
+        Some(semantic_token_type::FUNCTION)
+    );
+}
+
+#[test]
 fn parses_construct_scopes_and_associate_aliases() {
     let mut ws = Workspace::new();
     let src = "subroutine work(obj)\n\
