@@ -217,11 +217,15 @@ and run the deterministic harness for every completed point.
       diagnostics, definitions, hover, signatures, rename, and completion now
       treat fortls as an availability oracle where fortls has known missing or
       overbroad behavior.
-- [ ] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
+- [x] Preprocessor parity phase 2. Cover the remaining C-preprocessor shapes
       seen in production Fortran: macro stringification (`#`), token pasting
       (`##`), recursive/nested macro expansion in directive expressions,
       `#line` / line-marker tolerance, and multiline macro bodies with
       continuations. Port only with focused fixtures or real-project evidence.
+      Added focused regressions for all listed shapes; `cargo test -p
+      fortran-lsp` passes. The deterministic harness was attempted, but the
+      local `/tmp/fortls-reference` oracle is missing its
+      `fortls.parsers.internal.ast` source module and exits before comparison.
 - [ ] Procedure pointer and callback modelling. Index and resolve
       `procedure(interface), pointer :: cb`, dummy procedure arguments,
       procedure-pointer assignments, calls through procedure variables, and

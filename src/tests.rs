@@ -6801,6 +6801,71 @@ fn preprocessor_expands_function_like_macros_before_parsing() {
 }
 
 #[test]
+fn preprocessor_expands_token_paste_macros_before_parsing() {
+    let parsed = ParsedFile::parse(
+        "macro.F90",
+        "#define WRAP(PROCEDURE) PROCEDURE , wrap_ ## PROCEDURE\nmodule m\ninterface set\nmodule procedure WRAP(abc)\nend interface\ncontains\nsubroutine abc()\nend subroutine\nsubroutine wrap_abc()\nend subroutine\nend module",
+    );
+    let interface_scope = vec!["m".to_string(), "set".to_string()];
+    let module_procedures: Vec<_> = parsed
+        .symbols
+        .iter()
+        .filter(|sym| sym.scope == interface_scope)
+        .map(|sym| sym.name.as_str())
+        .collect();
+    assert_eq!(module_procedures, vec!["abc", "wrap_abc"]);
+}
+
+#[test]
+fn preprocessor_expands_stringification_macros_before_parsing() {
+    let parsed = ParsedFile::parse(
+        "macro.F90",
+        "#define LABEL(NAME) character(len=*), parameter :: label = #NAME\nmodule m\nLABEL(hello world)\nend module",
+    );
+    assert!(parsed.symbols.iter().any(|sym| sym.name == "label"));
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diag| !diag.message.contains("NAME")),
+        "{:?}",
+        parsed.diagnostics
+    );
+}
+
+#[test]
+fn preprocessor_expands_nested_function_macros_in_conditionals() {
+    let parsed = ParsedFile::parse(
+        "macro.F90",
+        "#define VALUE 4\n#define GE(A, B) ((A) >= (B))\n#define ENABLED(X) GE(X, 3)\nmodule m\n#if ENABLED(VALUE)\ninteger :: active\n#else\ninteger :: inactive\n#endif\nend module",
+    );
+    let names: Vec<_> = parsed.symbols.iter().map(|sym| sym.name.as_str()).collect();
+    assert!(names.contains(&"active"));
+    assert!(!names.contains(&"inactive"));
+}
+
+#[test]
+fn preprocessor_joins_multiline_macro_bodies() {
+    let parsed = ParsedFile::parse(
+        "macro.F90",
+        "#define DECL(NAME) integer :: \\\n  NAME\nmodule m\nDECL(from_macro)\nend module",
+    );
+    assert!(parsed.symbols.iter().any(|sym| sym.name == "from_macro"));
+}
+
+#[test]
+fn preprocessor_tolerates_line_markers() {
+    let parsed = ParsedFile::parse(
+        "macro.F90",
+        "#line 42 \"generated.F90\"\n# 100 \"generated.F90\" 2\nmodule m\ninteger :: x\nend module",
+    );
+    assert!(parsed.symbols.iter().any(|sym| sym.name == "x"));
+    assert!(parsed.diagnostics.iter().all(|diag| {
+        !diag.message.contains("#line") && !diag.message.contains("generated.F90")
+    }));
+}
+
+#[test]
 fn preprocessor_include_definitions_expand_later_source() {
     let tmp = std::env::temp_dir().join(format!(
         "fortran-lsp-macro-{}-{}",

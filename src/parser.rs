@@ -121,6 +121,9 @@ impl<'a> Parser<'a> {
                 self.parsed.preprocessor.push(directive);
                 continue;
             }
+            if is_ignored_preprocessor_line(raw_code) {
+                continue;
+            }
             if !self.preprocessor_active() {
                 continue;
             }
@@ -806,6 +809,9 @@ impl<'a> Parser<'a> {
             let Some(directive) =
                 parse_preprocessor(raw_code, line_no, &path, &self.current_scope())
             else {
+                if is_ignored_preprocessor_line(raw_code) {
+                    continue;
+                }
                 continue;
             };
             let was_active = self.preprocessor_active();
@@ -867,7 +873,7 @@ impl<'a> Parser<'a> {
     fn eval_preprocessor_directive(&self, directive: &PreprocessorDirective) -> bool {
         match directive.kind {
             PreprocessorKind::If => directive.argument.as_deref().is_some_and(|expr| {
-                let expr = expand_function_like_macros(expr, &self.preprocessor_macros);
+                let expr = expand_function_like_macros_recursive(expr, &self.preprocessor_macros);
                 eval_preprocessor_expr(&expr, &self.parsed.preprocessor_definitions)
             }),
             PreprocessorKind::Ifdef => directive
@@ -879,7 +885,7 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .is_some_and(|name| !self.parsed.preprocessor_definitions.contains_key(name)),
             PreprocessorKind::Elif => directive.argument.as_deref().is_some_and(|expr| {
-                let expr = expand_function_like_macros(expr, &self.preprocessor_macros);
+                let expr = expand_function_like_macros_recursive(expr, &self.preprocessor_macros);
                 eval_preprocessor_expr(&expr, &self.parsed.preprocessor_definitions)
             }),
             _ => false,
@@ -1381,7 +1387,11 @@ fn logical_lines(
     predefined: &HashMap<String, String>,
 ) -> Vec<(usize, String)> {
     let physical_lines = filter_inactive_preprocessor_lines(
-        expand_preprocessor_include_lines(path, source, &mut HashSet::new()),
+        join_preprocessor_continuations(expand_preprocessor_include_lines(
+            path,
+            source,
+            &mut HashSet::new(),
+        )),
         predefined,
     );
     if is_fixed_form_path(path) {
@@ -1519,6 +1529,44 @@ fn expand_preprocessor_include_lines(
     out
 }
 
+fn join_preprocessor_continuations(lines: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut current: Option<(usize, String)> = None;
+    for (idx, line) in lines {
+        if let Some((start, mut joined)) = current.take() {
+            joined.push(' ');
+            joined.push_str(line.trim_start());
+            if line.trim_end().ends_with('\\') {
+                joined = joined
+                    .trim_end()
+                    .trim_end_matches('\\')
+                    .trim_end()
+                    .to_string();
+                current = Some((start, joined));
+            } else {
+                out.push((start, joined));
+            }
+            continue;
+        }
+
+        if line.trim_start().starts_with('#') && line.trim_end().ends_with('\\') {
+            current = Some((
+                idx,
+                line.trim_end()
+                    .trim_end_matches('\\')
+                    .trim_end()
+                    .to_string(),
+            ));
+        } else {
+            out.push((idx, line));
+        }
+    }
+    if let Some(line) = current {
+        out.push(line);
+    }
+    out
+}
+
 fn resolve_include_path_from(from: &Path, include: &str) -> Option<PathBuf> {
     let include = Path::new(include);
     if include.is_absolute() && include.exists() {
@@ -1540,6 +1588,9 @@ fn filter_inactive_preprocessor_lines(
     };
     for (idx, line) in lines {
         let trimmed = line.trim();
+        if is_ignored_preprocessor_line(trimmed) {
+            continue;
+        }
         if let Some(directive) = parse_preprocessor(trimmed, idx, Path::new("<fold>"), &[]) {
             state.apply(&directive);
             out.push((idx, line));
@@ -1576,7 +1627,7 @@ impl FoldPreprocessorState {
                 let parent_active = self.active();
                 let condition = match directive.kind {
                     PreprocessorKind::If => directive.argument.as_deref().is_some_and(|expr| {
-                        let expr = expand_function_like_macros(expr, &self.macros);
+                        let expr = expand_function_like_macros_recursive(expr, &self.macros);
                         eval_preprocessor_expr(&expr, &self.definitions)
                     }),
                     PreprocessorKind::Ifdef => directive
@@ -1602,7 +1653,7 @@ impl FoldPreprocessorState {
                     return;
                 };
                 let condition = directive.argument.as_deref().is_some_and(|expr| {
-                    let expr = expand_function_like_macros(expr, &self.macros);
+                    let expr = expand_function_like_macros_recursive(expr, &self.macros);
                     eval_preprocessor_expr(&expr, &self.definitions)
                 });
                 frame.branch_active =
@@ -2459,6 +2510,18 @@ fn parse_preprocessor(
     })
 }
 
+fn is_ignored_preprocessor_line(code: &str) -> bool {
+    let Some(rest) = code.trim_start().strip_prefix('#') else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    rest.starts_with("line")
+        || rest
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_digit())
+}
+
 fn eval_preprocessor_expr(expr: &str, defs: &HashMap<String, String>) -> bool {
     eval_or(expr.trim(), defs)
 }
@@ -2554,12 +2617,125 @@ fn expand_function_like_macros(line: &str, macros: &HashMap<String, MacroDefinit
     out
 }
 
+fn expand_function_like_macros_recursive(
+    line: &str,
+    macros: &HashMap<String, MacroDefinition>,
+) -> String {
+    let mut expanded = line.to_string();
+    for _ in 0..8 {
+        let next = expand_function_like_macros(&expanded, macros);
+        if next == expanded {
+            return next;
+        }
+        expanded = next;
+    }
+    expanded
+}
+
 fn expand_function_macro(params: &[String], body: &str, args: &[String]) -> String {
-    let mut expanded = body.to_string();
+    let mut expanded = expand_stringification(params, body, args);
+    expanded = expand_token_paste(params, &expanded, args);
     for (param, arg) in params.iter().zip(args.iter()) {
         expanded = replace_identifier(&expanded, param, arg.trim());
     }
     expanded.replace("/**/", "")
+}
+
+fn expand_stringification(params: &[String], body: &str, args: &[String]) -> String {
+    let mut expanded = body.to_string();
+    for (param, arg) in params.iter().zip(args.iter()) {
+        let marker = format!("#{param}");
+        expanded = replace_stringification_marker(&expanded, &marker, &stringify_macro_arg(arg));
+    }
+    expanded
+}
+
+fn replace_stringification_marker(source: &str, marker: &str, replacement: &str) -> String {
+    let mut out = String::new();
+    let mut idx = 0usize;
+    while let Some(found) = source[idx..].find(marker) {
+        let absolute = idx + found;
+        out.push_str(&source[idx..absolute]);
+        let before = source[..absolute].chars().next_back();
+        let after = source[absolute + marker.len()..].chars().next();
+        if before.is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+            || after.is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        {
+            out.push_str(marker);
+        } else {
+            out.push_str(replacement);
+        }
+        idx = absolute + marker.len();
+    }
+    out.push_str(&source[idx..]);
+    out
+}
+
+fn stringify_macro_arg(arg: &str) -> String {
+    let mut compact = String::new();
+    let mut prev_ws = false;
+    for ch in arg.trim().chars() {
+        if ch.is_whitespace() {
+            if !prev_ws && !compact.is_empty() {
+                compact.push(' ');
+            }
+            prev_ws = true;
+            continue;
+        }
+        if matches!(ch, '"' | '\\') {
+            compact.push('\\');
+        }
+        compact.push(ch);
+        prev_ws = false;
+    }
+    format!("\"{compact}\"")
+}
+
+fn expand_token_paste(params: &[String], body: &str, args: &[String]) -> String {
+    let mut expanded = body.to_string();
+    while let Some((lhs, rhs, range)) = next_token_paste(&expanded) {
+        let lhs = macro_token_text(params, args, &lhs);
+        let rhs = macro_token_text(params, args, &rhs);
+        expanded.replace_range(range, &format!("{lhs}{rhs}"));
+    }
+    expanded
+}
+
+fn next_token_paste(source: &str) -> Option<(String, String, std::ops::Range<usize>)> {
+    let paste = source.find("##")?;
+    let lhs_end = source[..paste].trim_end().len();
+    let lhs_start = token_start(source, lhs_end)?;
+    let rhs_start = paste + 2 + source[paste + 2..].len() - source[paste + 2..].trim_start().len();
+    let rhs_end = token_end(source, rhs_start)?;
+    Some((
+        source[lhs_start..lhs_end].to_string(),
+        source[rhs_start..rhs_end].to_string(),
+        lhs_start..rhs_end,
+    ))
+}
+
+fn token_start(source: &str, end: usize) -> Option<usize> {
+    let prefix = &source[..end];
+    let start = prefix
+        .rfind(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .map_or(0, |idx| idx + 1);
+    (start < end).then_some(start)
+}
+
+fn token_end(source: &str, start: usize) -> Option<usize> {
+    let tail = &source[start..];
+    let len = tail
+        .find(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .unwrap_or(tail.len());
+    (len > 0).then_some(start + len)
+}
+
+fn macro_token_text(params: &[String], args: &[String], token: &str) -> String {
+    params
+        .iter()
+        .zip(args.iter())
+        .find_map(|(param, arg)| (token == param).then(|| arg.trim().to_string()))
+        .unwrap_or_else(|| token.to_string())
 }
 
 fn replace_identifier(source: &str, ident: &str, replacement: &str) -> String {
