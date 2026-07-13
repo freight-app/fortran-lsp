@@ -226,11 +226,13 @@ and run the deterministic harness for every completed point.
       fortran-lsp` passes. The deterministic harness was attempted, but the
       local `/tmp/fortls-reference` oracle is missing its
       `fortls.parsers.internal.ast` source module and exits before comparison.
-- [ ] Procedure pointer and callback modelling. Index and resolve
+- [x] Procedure pointer and callback modelling. Index and resolve
       `procedure(interface), pointer :: cb`, dummy procedure arguments,
       procedure-pointer assignments, calls through procedure variables, and
       procedure pointer components without confusing them with type-bound
-      bindings. Add hover/definition/signature/diagnostic coverage.
+      bindings. Added hover, definition, signature-help, and call-diagnostic
+      coverage for local/imported abstract-interface procedure variables,
+      procedure-pointer assignments, and procedure pointer components.
 - [ ] Generic overload selection by argument characteristics. Improve generic
       interface and type-bound generic resolution beyond argument count and
       keyword names by using declared actual/dummy types where available,

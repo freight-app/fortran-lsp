@@ -3147,7 +3147,10 @@ fn parse_variables(
         let col = find_ci(code, &item.name).unwrap_or(0);
         symbols.push(Symbol {
             name: item.name.clone(),
-            kind: if decl.type_keyword == "procedure" && in_type_binding_part {
+            kind: if decl.type_keyword == "procedure"
+                && in_type_binding_part
+                && !decl.has_attribute("pointer")
+            {
                 SymbolKind::Method
             } else {
                 SymbolKind::Variable

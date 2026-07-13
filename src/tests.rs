@@ -129,6 +129,155 @@ end module";
 }
 
 #[test]
+fn procedure_dummies_use_interface_for_hover_signature_and_diagnostics() {
+    let src = "module fit\n\
+abstract interface\n\
+function expr_f(x) result(y)\n\
+real, intent(in) :: x\n\
+real :: y\n\
+end function\n\
+end interface\n\
+contains\n\
+subroutine find_fit(expr)\n\
+procedure(expr_f) :: expr\n\
+real :: value\n\
+value = expr(1.0)\n\
+end subroutine\n\
+end module";
+    let mut ws = Workspace::new();
+    ws.upsert_file("fit.f90", src);
+
+    let hover = ws
+        .hover(Path::new("fit.f90"), Position::new(11, 8), src)
+        .unwrap();
+    assert!(hover.contains("expr(x)"), "{hover}");
+    let sig = ws
+        .signature_help(Path::new("fit.f90"), Position::new(11, 13), src)
+        .unwrap();
+    assert_eq!(sig.label, "expr(x)");
+    assert_eq!(sig.parameters, vec!["x"]);
+    assert!(ws.diagnostics(Path::new("fit.f90")).is_empty());
+
+    let bad = src.replace("value = expr(1.0)", "value = expr(1.0, 2.0)");
+    ws.upsert_file("fit.f90", &bad);
+    let diagnostics = ws.diagnostics(Path::new("fit.f90"));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("call to `expr` passes too many")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn procedure_pointer_components_are_callable_without_type_bound_confusion() {
+    let src = "module callbacks\n\
+abstract interface\n\
+subroutine kernel(x)\n\
+real, intent(inout) :: x\n\
+end subroutine\n\
+end interface\n\
+type :: runner\n\
+procedure(kernel), pointer, nopass :: cb\n\
+contains\n\
+procedure :: run\n\
+end type\n\
+contains\n\
+subroutine run(self, x)\n\
+class(runner), intent(inout) :: self\n\
+real, intent(inout) :: x\n\
+call self%cb(x)\n\
+end subroutine\n\
+end module";
+    let parsed = ParsedFile::parse("callbacks.f90", src);
+    let cb = parsed
+        .symbols
+        .iter()
+        .find(|sym| sym.name == "cb")
+        .expect("procedure pointer component should be indexed");
+    assert_eq!(cb.kind, SymbolKind::Variable);
+
+    let mut ws = Workspace::new();
+    ws.upsert_file("callbacks.f90", src);
+    let hover = ws
+        .hover(Path::new("callbacks.f90"), Position::new(15, 10), src)
+        .unwrap();
+    assert!(hover.contains("cb(x)"), "{hover}");
+    let sig = ws
+        .signature_help(Path::new("callbacks.f90"), Position::new(15, 13), src)
+        .unwrap();
+    assert_eq!(sig.label, "cb(x)");
+    assert_eq!(sig.parameters, vec!["x"]);
+    assert!(ws.diagnostics(Path::new("callbacks.f90")).is_empty());
+}
+
+#[test]
+fn procedure_pointer_assignment_and_call_use_declared_interface() {
+    let src = "module callbacks\n\
+abstract interface\n\
+subroutine kernel(x)\n\
+real, intent(inout) :: x\n\
+end subroutine\n\
+end interface\n\
+contains\n\
+subroutine concrete(x)\n\
+real, intent(inout) :: x\n\
+end subroutine\n\
+subroutine run(x)\n\
+real, intent(inout) :: x\n\
+procedure(kernel), pointer :: cb\n\
+cb => concrete\n\
+call cb(x)\n\
+end subroutine\n\
+end module";
+    let mut ws = Workspace::new();
+    ws.upsert_file("callbacks.f90", src);
+    let cb = ws
+        .definition(Path::new("callbacks.f90"), Position::new(14, 5), src)
+        .expect("call through procedure pointer should resolve");
+    assert_eq!(cb.name, "cb");
+    let concrete = ws
+        .definition(Path::new("callbacks.f90"), Position::new(13, 7), src)
+        .expect("procedure pointer assignment target should resolve");
+    assert_eq!(concrete.name, "concrete");
+    let sig = ws
+        .signature_help(Path::new("callbacks.f90"), Position::new(14, 8), src)
+        .unwrap();
+    assert_eq!(sig.label, "cb(x)");
+    assert!(ws.diagnostics(Path::new("callbacks.f90")).is_empty());
+}
+
+#[test]
+fn procedure_variables_use_imported_abstract_interface_signatures() {
+    let interfaces = "module interfaces\n\
+abstract interface\n\
+subroutine kernel(x, y)\n\
+real, intent(inout) :: x\n\
+real, intent(in), optional :: y\n\
+end subroutine\n\
+end interface\n\
+end module";
+    let app = "module app\n\
+use interfaces, only: kernel\n\
+contains\n\
+subroutine run(cb, x)\n\
+procedure(kernel) :: cb\n\
+real, intent(inout) :: x\n\
+call cb(x)\n\
+end subroutine\n\
+end module";
+    let mut ws = Workspace::new();
+    ws.upsert_file("interfaces.f90", interfaces);
+    ws.upsert_file("app.f90", app);
+    let sig = ws
+        .signature_help(Path::new("app.f90"), Position::new(6, 8), app)
+        .unwrap();
+    assert_eq!(sig.label, "cb(x, y)");
+    assert_eq!(sig.parameters, vec!["x", "y"]);
+    assert!(ws.diagnostics(Path::new("app.f90")).is_empty());
+}
+
+#[test]
 fn workspace_resolves_use_only_definition() {
     let mut ws = Workspace::new();
     ws.upsert_file(

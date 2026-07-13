@@ -420,7 +420,22 @@ impl Workspace {
             return Some(self.symbol_hover(sym));
         }
         if let Some(access) = member_access_at_source(source, pos) {
-            if let Some(method) = self.find_member_method(path, &access.receiver, &access.member) {
+            if let Some(component) = self.find_procedure_pointer_component_at(
+                path,
+                pos,
+                &access.receiver,
+                &access.member,
+            ) {
+                return Some(self.symbol_hover(component));
+            }
+            if let Some(method) = self.find_member_method_for_call(
+                path,
+                pos,
+                &access.receiver,
+                &access.member,
+                0,
+                None,
+            ) {
                 return Some(self.symbol_hover(method));
             }
         }
@@ -512,7 +527,25 @@ impl Workspace {
             );
         }
         if let Some(access) = member_access_at_source(source, pos) {
-            if let Some(method) = self.find_member_method(path, &access.receiver, &access.member) {
+            if let Some(component) = self.find_procedure_pointer_component_at(
+                path,
+                pos,
+                &access.receiver,
+                &access.member,
+            ) {
+                return Some(
+                    self.procedure_interface_prototype(component)
+                        .unwrap_or(component),
+                );
+            }
+            if let Some(method) = self.find_member_method_for_call(
+                path,
+                pos,
+                &access.receiver,
+                &access.member,
+                0,
+                None,
+            ) {
                 return Some(self.method_target_symbol(method).unwrap_or(method));
             }
         }
@@ -548,7 +581,7 @@ impl Workspace {
         source: &str,
     ) -> Option<Location> {
         let sym = if let Some(access) = member_access_at_source(source, pos) {
-            self.find_member_method(path, &access.receiver, &access.member)
+            self.find_member_method_for_call(path, pos, &access.receiver, &access.member, 0, None)
                 .and_then(|method| self.method_target_symbol(method))
         } else if let Some(sym) = self.files.get(path).and_then(|file| file.symbol_at(pos)) {
             self.method_target_symbol(sym)
@@ -1171,8 +1204,28 @@ impl Workspace {
     ) -> Option<SignatureHelp> {
         let call = call_context(source, pos)?;
         if let Some(receiver) = &call.receiver {
+            if let Some(component) =
+                self.find_procedure_pointer_component_at(path, pos, receiver, &call.name)
+            {
+                if let Some(target) = self.procedure_interface_prototype(component) {
+                    return Some(SignatureHelp {
+                        label: procedure_pointer_signature_label(component, target),
+                        parameters: target.args.clone(),
+                        active_parameter: signature_active_parameter(
+                            &target.args,
+                            call.active_parameter,
+                            call.active_argument_name.as_deref(),
+                        ),
+                        documentation: component
+                            .documentation
+                            .clone()
+                            .or_else(|| target.documentation.clone()),
+                    });
+                }
+            }
             if let Some(method) = self.find_member_method_for_call(
                 path,
+                pos,
                 receiver,
                 &call.name,
                 call.argument_count,
@@ -1209,6 +1262,21 @@ impl Workspace {
                         call.active_argument_name.as_deref(),
                     ),
                     documentation: target.documentation.clone(),
+                });
+            }
+            if let Some(target) = self.procedure_interface_prototype(sym) {
+                return Some(SignatureHelp {
+                    label: procedure_pointer_signature_label(sym, target),
+                    parameters: target.args.clone(),
+                    active_parameter: signature_active_parameter(
+                        &target.args,
+                        call.active_parameter,
+                        call.active_argument_name.as_deref(),
+                    ),
+                    documentation: sym
+                        .documentation
+                        .clone()
+                        .or_else(|| target.documentation.clone()),
                 });
             }
             if !matches!(sym.kind, SymbolKind::Subroutine | SymbolKind::Function) {
@@ -1483,6 +1551,9 @@ impl Workspace {
         if let Some(prototype) = self.module_procedure_prototype(sym) {
             return prototype.hover_markdown();
         }
+        if let Some(prototype) = self.procedure_interface_prototype(sym) {
+            return procedure_pointer_hover(sym, prototype);
+        }
         sym.hover_markdown()
     }
 
@@ -1521,8 +1592,18 @@ impl Workspace {
         argument_count: usize,
     ) -> Option<Vec<CallParameter>> {
         if let Some(receiver) = receiver {
-            let method =
-                self.find_member_method_for_call(path, receiver, name, argument_count, None)?;
+            if let Some(component) = self.find_procedure_pointer_component(path, receiver, name) {
+                let target = self.procedure_interface_prototype(component)?;
+                return Some(self.procedure_call_parameters(target, &target.args));
+            }
+            let method = self.find_member_method_for_call(
+                path,
+                Position::new(0, 0),
+                receiver,
+                name,
+                argument_count,
+                None,
+            )?;
             let target = self.method_target_symbol(method)?;
             let params = self.method_call_parameters(method, target);
             if params.is_empty() && argument_count > 0 {
@@ -1545,6 +1626,12 @@ impl Workspace {
                 return Some(params);
             }
             if let Some(target) = self.find_generic_interface_procedure(sym, argument_count) {
+                if target.args.is_empty() && argument_count > 0 {
+                    return None;
+                }
+                return Some(self.procedure_call_parameters(target, &target.args));
+            }
+            if let Some(target) = self.procedure_interface_prototype(sym) {
                 if target.args.is_empty() && argument_count > 0 {
                     return None;
                 }
@@ -1573,8 +1660,19 @@ impl Workspace {
         call: &LineCall,
     ) -> Option<Vec<CallParameter>> {
         if let Some(receiver) = &call.receiver {
-            let method =
-                self.find_member_method_for_call_args(path, receiver, &call.name, &call.args)?;
+            if let Some(component) =
+                self.find_procedure_pointer_component_at(path, call.start, receiver, &call.name)
+            {
+                let target = self.procedure_interface_prototype(component)?;
+                let params = self.procedure_call_parameters(target, &target.args);
+                if params.is_empty() && !call.args.is_empty() {
+                    return None;
+                }
+                return Some(params);
+            }
+            let method = self.find_member_method_for_call_args(
+                path, call.start, receiver, &call.name, &call.args,
+            )?;
             let target = self.method_target_symbol(method)?;
             let params = self.method_call_parameters(method, target);
             if params.is_empty() && !call.args.is_empty() {
@@ -1597,6 +1695,12 @@ impl Workspace {
                 return Some(params);
             }
             if let Some(target) = self.find_generic_interface_procedure_for_args(sym, &call.args) {
+                if target.args.is_empty() && !call.args.is_empty() {
+                    return None;
+                }
+                return Some(self.procedure_call_parameters(target, &target.args));
+            }
+            if let Some(target) = self.procedure_interface_prototype(sym) {
                 if target.args.is_empty() && !call.args.is_empty() {
                     return None;
                 }
@@ -1653,18 +1757,52 @@ impl Workspace {
     }
 
     fn find_member_method(&self, path: &Path, receiver: &str, member: &str) -> Option<&Symbol> {
-        self.find_member_method_for_call(path, receiver, member, 0, None)
+        self.find_member_method_for_call(path, Position::new(0, 0), receiver, member, 0, None)
+            .or_else(|| self.find_procedure_pointer_component(path, receiver, member))
+    }
+
+    fn find_procedure_pointer_component(
+        &self,
+        path: &Path,
+        receiver: &str,
+        member: &str,
+    ) -> Option<&Symbol> {
+        let receiver_sym = self.find_visible_symbol(path, receiver)?;
+        self.find_procedure_pointer_component_for_receiver(receiver_sym, member)
+    }
+
+    fn find_procedure_pointer_component_at(
+        &self,
+        path: &Path,
+        pos: Position,
+        receiver: &str,
+        member: &str,
+    ) -> Option<&Symbol> {
+        let receiver_sym = self.find_visible_symbol_at(path, pos, receiver)?;
+        self.find_procedure_pointer_component_for_receiver(receiver_sym, member)
+    }
+
+    fn find_procedure_pointer_component_for_receiver(
+        &self,
+        receiver_sym: &Symbol,
+        member: &str,
+    ) -> Option<&Symbol> {
+        let type_name = declared_type_name(receiver_sym)?;
+        let ty = self.find_type_for_symbol(receiver_sym, type_name)?;
+        let mut visited = HashSet::new();
+        self.find_type_procedure_pointer_component_recursive(ty, member, &mut visited)
     }
 
     fn find_member_method_for_call(
         &self,
         path: &Path,
+        pos: Position,
         receiver: &str,
         member: &str,
         argument_count: usize,
         active_keyword: Option<&str>,
     ) -> Option<&Symbol> {
-        let receiver_sym = self.find_visible_symbol(path, receiver)?;
+        let receiver_sym = self.find_visible_symbol_at(path, pos, receiver)?;
         let type_name = declared_type_name(receiver_sym)?;
         let ty = self.find_type_for_symbol(receiver_sym, type_name)?;
         let mut visited = HashSet::new();
@@ -1696,11 +1834,12 @@ impl Workspace {
     fn find_member_method_for_call_args(
         &self,
         path: &Path,
+        pos: Position,
         receiver: &str,
         member: &str,
         args: &[LineCallArg],
     ) -> Option<&Symbol> {
-        let receiver_sym = self.find_visible_symbol(path, receiver)?;
+        let receiver_sym = self.find_visible_symbol_at(path, pos, receiver)?;
         let type_name = declared_type_name(receiver_sym)?;
         let ty = self.find_type_for_symbol(receiver_sym, type_name)?;
         let mut visited = HashSet::new();
@@ -3329,6 +3468,27 @@ impl Workspace {
             })
     }
 
+    fn procedure_interface_prototype<'a>(&'a self, sym: &'a Symbol) -> Option<&'a Symbol> {
+        let interface_name = procedure_interface_name(sym.type_spec.as_deref()?)?;
+        self.by_name
+            .get(&interface_name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter_map(|(p, idx)| self.files.get(p).and_then(|f| f.symbols.get(*idx)))
+            .find(|candidate| {
+                matches!(
+                    candidate.kind,
+                    SymbolKind::Subroutine | SymbolKind::Function
+                ) && candidate.name.eq_ignore_ascii_case(interface_name)
+                    && candidate
+                        .scope
+                        .iter()
+                        .any(|part| part.eq_ignore_ascii_case("interface"))
+                    && (candidate.scope.first() == sym.scope.first()
+                        || self.file_uses_exported_symbol(&sym.file, candidate, interface_name))
+            })
+    }
+
     fn find_procedure_in_scope(&self, scope: &[String], name: &str) -> Option<&Symbol> {
         self.by_name
             .get(&name.to_ascii_lowercase())
@@ -3629,6 +3789,34 @@ impl Workspace {
             })
     }
 
+    fn find_type_procedure_pointer_component_recursive<'a>(
+        &'a self,
+        ty: &'a Symbol,
+        member: &str,
+        visited: &mut HashSet<String>,
+    ) -> Option<&'a Symbol> {
+        let key = ty.qualified_name().to_ascii_lowercase();
+        if !visited.insert(key) {
+            return None;
+        }
+        let Some(file) = self.files.get(&ty.file) else {
+            return None;
+        };
+        let mut member_scope = ty.scope.clone();
+        member_scope.push(ty.name.clone());
+        if let Some(component) = file.symbols.iter().find(|sym| {
+            sym.kind == SymbolKind::Variable
+                && sym.name.eq_ignore_ascii_case(member)
+                && scopes_equal(&sym.scope, &member_scope)
+                && procedure_interface_name(sym.type_spec.as_deref().unwrap_or_default()).is_some()
+        }) {
+            return Some(component);
+        }
+        let parent_name = ty.extends.as_ref()?;
+        let parent = self.find_parent_type(file, ty, parent_name)?;
+        self.find_type_procedure_pointer_component_recursive(parent, member, visited)
+    }
+
     fn find_type_method_recursive<'a>(
         &'a self,
         ty: &'a Symbol,
@@ -3866,6 +4054,19 @@ impl Workspace {
                 return false;
             };
             self.module_exports_type_symbol(module, &remote_name, ty, &mut HashSet::new())
+        })
+    }
+
+    fn file_uses_exported_symbol(&self, file: &Path, sym: &Symbol, local_name: &str) -> bool {
+        let Some(file) = self.files.get(file) else {
+            return false;
+        };
+        file.uses.iter().any(|use_stmt| {
+            let Some(remote_name) = use_visible_remote_name(use_stmt, local_name) else {
+                return false;
+            };
+            self.find_module_export_symbol(&use_stmt.module, &remote_name)
+                .is_some_and(|export| SymbolKey::from_symbol(export) == SymbolKey::from_symbol(sym))
         })
     }
 
@@ -4862,6 +5063,29 @@ fn method_hover(method: &Symbol, target: &Symbol) -> String {
         out.push_str("visibility: `");
         out.push_str(method.visibility.label());
         out.push('`');
+    }
+    out
+}
+
+fn procedure_pointer_hover(sym: &Symbol, prototype: &Symbol) -> String {
+    let mut out = format!(
+        "```fortran\n{}\n```",
+        procedure_pointer_signature_label(sym, prototype)
+    );
+    if !sym.scope.is_empty() {
+        out.push_str("\n\n");
+        out.push_str("scope: `");
+        out.push_str(&sym.scope.join("::"));
+        out.push('`');
+    }
+    if let Some(docs) = sym
+        .documentation
+        .as_ref()
+        .or(prototype.documentation.as_ref())
+        .filter(|docs| !docs.is_empty())
+    {
+        out.push_str("\n\n");
+        out.push_str(docs);
     }
     out
 }
@@ -6610,6 +6834,14 @@ fn procedure_signature_label(sym: &Symbol) -> String {
         return format!("{}({})", sym.name, sym.args.join(", "));
     }
     sym.signature.clone()
+}
+
+fn procedure_pointer_signature_label(sym: &Symbol, prototype: &Symbol) -> String {
+    if prototype.args.is_empty() {
+        format!("{}()", sym.name)
+    } else {
+        format!("{}({})", sym.name, prototype.args.join(", "))
+    }
 }
 
 fn signature_has_module_procedure_prefix(signature: &str) -> bool {
