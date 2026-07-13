@@ -354,6 +354,41 @@ fn workspace_upsert_preserves_symbol_index_for_body_only_changes() {
 }
 
 #[test]
+fn workspace_tracks_direct_include_dependents_after_late_include_insert() {
+    let mut ws = Workspace::new();
+    let app_path = PathBuf::from("src/app.f90");
+    let include_path = PathBuf::from("include/defs.inc");
+    ws.set_include_roots([PathBuf::from("include")]);
+
+    ws.upsert_file(
+        &app_path,
+        "program app\ninclude 'defs.inc'\nanswer = 42\nend",
+    );
+    assert!(ws.direct_dependents(&include_path).is_empty());
+
+    ws.upsert_file(&include_path, "integer :: answer");
+    assert_eq!(ws.direct_dependents(&include_path), vec![app_path]);
+}
+
+#[test]
+fn workspace_tracks_direct_module_dependents() {
+    let mut ws = Workspace::new();
+    let module_path = PathBuf::from("math.f90");
+    let app_path = PathBuf::from("app.f90");
+
+    ws.upsert_file(
+        &app_path,
+        "program app\nuse math\ncall axpy(1.0)\nend program",
+    );
+    ws.upsert_file(
+        &module_path,
+        "module math\ncontains\nsubroutine axpy(x)\nreal :: x\nend subroutine\nend module",
+    );
+
+    assert_eq!(ws.direct_dependents(&module_path), vec![app_path]);
+}
+
+#[test]
 fn line_length_diagnostics_follow_fortls_limits() {
     let mut ws = Workspace::new();
     ws.set_line_length_limits(Some(12), Some(10));

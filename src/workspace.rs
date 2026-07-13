@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::intrinsics;
@@ -19,6 +19,10 @@ pub struct Workspace {
     files: HashMap<PathBuf, ParsedFile>,
     by_name: HashMap<String, Vec<(PathBuf, usize)>>,
     file_symbol_index: HashMap<PathBuf, Vec<(String, usize)>>,
+    file_api_index: HashMap<PathBuf, Vec<ApiSymbolKey>>,
+    file_dependency_index: HashMap<PathBuf, FileDependencyIndex>,
+    include_dependents: HashMap<PathBuf, BTreeSet<PathBuf>>,
+    module_dependents: HashMap<String, BTreeSet<PathBuf>>,
     include_roots: Vec<PathBuf>,
     config: WorkspaceConfig,
     predefined_macros: Vec<(String, String)>,
@@ -36,6 +40,30 @@ struct SymbolKey {
     scope: Vec<String>,
     name: String,
     kind: SymbolKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApiSymbolKey {
+    scope: Vec<String>,
+    name: String,
+    kind: SymbolKind,
+    signature: String,
+    args: Vec<String>,
+    visibility: Visibility,
+    type_spec: Option<String>,
+    attributes: Vec<String>,
+    result: Option<String>,
+    binding_target: Option<String>,
+    pass_arg: Option<String>,
+    is_deferred: bool,
+    is_module_procedure: bool,
+    ancestor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FileDependencyIndex {
+    includes: BTreeSet<PathBuf>,
+    modules: BTreeSet<String>,
 }
 
 impl SymbolKey {
@@ -58,6 +86,49 @@ fn symbol_index(file: &ParsedFile) -> Vec<(String, usize)> {
         .iter()
         .enumerate()
         .map(|(idx, sym)| (sym.name.to_ascii_lowercase(), idx))
+        .collect()
+}
+
+fn api_symbol_index(file: &ParsedFile) -> Vec<ApiSymbolKey> {
+    file.symbols
+        .iter()
+        .map(|sym| ApiSymbolKey {
+            scope: sym
+                .scope
+                .iter()
+                .map(|part| part.to_ascii_lowercase())
+                .collect(),
+            name: sym.name.to_ascii_lowercase(),
+            kind: sym.kind,
+            signature: sym.signature.clone(),
+            args: sym
+                .args
+                .iter()
+                .map(|arg| arg.to_ascii_lowercase())
+                .collect(),
+            visibility: sym.visibility,
+            type_spec: sym.type_spec.as_ref().map(|spec| spec.to_ascii_lowercase()),
+            attributes: sym
+                .attributes
+                .iter()
+                .map(|attr| attr.to_ascii_lowercase())
+                .collect(),
+            result: sym
+                .result
+                .as_ref()
+                .map(|result| result.to_ascii_lowercase()),
+            binding_target: sym
+                .binding_target
+                .as_ref()
+                .map(|target| target.to_ascii_lowercase()),
+            pass_arg: sym.pass_arg.as_ref().map(|arg| arg.to_ascii_lowercase()),
+            is_deferred: sym.is_deferred,
+            is_module_procedure: sym.is_module_procedure,
+            ancestor: sym
+                .ancestor
+                .as_ref()
+                .map(|ancestor| ancestor.to_ascii_lowercase()),
+        })
         .collect()
 }
 
@@ -127,14 +198,35 @@ impl Workspace {
     /// `ParsedFile::parse` is pure, so callers indexing a whole workspace can
     /// parse many files in parallel and insert the results sequentially here.
     pub fn upsert_parsed(&mut self, parsed: ParsedFile) {
+        let mut visited = HashSet::new();
+        self.upsert_parsed_inner(parsed, true, &mut visited);
+    }
+
+    fn upsert_parsed_inner(
+        &mut self,
+        parsed: ParsedFile,
+        propagate: bool,
+        visited: &mut HashSet<PathBuf>,
+    ) {
         let path = parsed.path.clone();
         let next_index = symbol_index(&parsed);
+        let next_api_index = api_symbol_index(&parsed);
+        let api_changed = !self
+            .file_api_index
+            .get(&path)
+            .is_some_and(|old| old == &next_api_index);
         if self
             .file_symbol_index
             .get(&path)
             .is_some_and(|old| old == &next_index)
         {
-            self.files.insert(path, parsed);
+            self.files.insert(path.clone(), parsed);
+            self.file_api_index.insert(path.clone(), next_api_index);
+            self.refresh_dependency_edges();
+            let affects_dependents = api_changed || self.include_dependents.contains_key(&path);
+            if propagate && affects_dependents {
+                self.reparse_direct_dependents(&path, visited);
+            }
             return;
         }
         self.remove_file(&path);
@@ -145,7 +237,13 @@ impl Workspace {
                 .push((path.clone(), *idx));
         }
         self.file_symbol_index.insert(path.clone(), next_index);
-        self.files.insert(path, parsed);
+        self.file_api_index.insert(path.clone(), next_api_index);
+        self.files.insert(path.clone(), parsed);
+        self.refresh_dependency_edges();
+        let affects_dependents = api_changed || self.include_dependents.contains_key(&path);
+        if propagate && affects_dependents {
+            self.reparse_direct_dependents(&path, visited);
+        }
     }
 
     pub fn set_include_roots<I, P>(&mut self, roots: I)
@@ -154,10 +252,12 @@ impl Workspace {
         P: Into<PathBuf>,
     {
         self.include_roots = roots.into_iter().map(Into::into).collect();
+        self.refresh_dependency_edges();
     }
 
     pub fn add_include_root(&mut self, root: impl Into<PathBuf>) {
         self.include_roots.push(root.into());
+        self.refresh_dependency_edges();
     }
 
     pub fn set_config(&mut self, config: WorkspaceConfig) {
@@ -179,6 +279,8 @@ impl Workspace {
 
     pub fn remove_file(&mut self, path: &Path) {
         self.files.remove(path);
+        self.file_api_index.remove(path);
+        self.file_dependency_index.remove(path);
         if let Some(old_index) = self.file_symbol_index.remove(path) {
             for (name, _) in old_index {
                 if let Some(entries) = self.by_name.get_mut(&name) {
@@ -186,6 +288,88 @@ impl Workspace {
                 }
             }
         }
+        self.refresh_dependency_edges();
+    }
+
+    pub fn direct_dependents(&self, path: &Path) -> Vec<PathBuf> {
+        let mut dependents = BTreeSet::new();
+        if let Some(paths) = self.include_dependents.get(path) {
+            dependents.extend(paths.iter().cloned());
+        }
+        if let Some(file) = self.files.get(path) {
+            for module in file
+                .symbols
+                .iter()
+                .filter(|sym| sym.kind == SymbolKind::Module)
+                .map(|sym| sym.name.to_ascii_lowercase())
+            {
+                if let Some(paths) = self.module_dependents.get(&module) {
+                    dependents.extend(paths.iter().cloned());
+                }
+            }
+        }
+        dependents.remove(path);
+        dependents.into_iter().collect()
+    }
+
+    fn reparse_direct_dependents(&mut self, path: &Path, visited: &mut HashSet<PathBuf>) {
+        if !visited.insert(path.to_path_buf()) {
+            return;
+        }
+        let dependents = self.direct_dependents(path);
+        for dependent in dependents {
+            if visited.contains(&dependent) {
+                continue;
+            }
+            let Some(source) = self.files.get(&dependent).map(|file| file.source.clone()) else {
+                continue;
+            };
+            let parsed =
+                ParsedFile::parse_with_defines(dependent, &source, &self.predefined_macros);
+            self.upsert_parsed_inner(parsed, true, visited);
+        }
+    }
+
+    fn refresh_dependency_edges(&mut self) {
+        let file_dependency_index: HashMap<PathBuf, FileDependencyIndex> = self
+            .files
+            .iter()
+            .map(|(path, file)| (path.clone(), self.file_dependencies(file)))
+            .collect();
+        let mut include_dependents: HashMap<PathBuf, BTreeSet<PathBuf>> = HashMap::new();
+        let mut module_dependents: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
+        for (path, deps) in &file_dependency_index {
+            for include in &deps.includes {
+                include_dependents
+                    .entry(include.clone())
+                    .or_default()
+                    .insert(path.clone());
+            }
+            for module in &deps.modules {
+                module_dependents
+                    .entry(module.clone())
+                    .or_default()
+                    .insert(path.clone());
+            }
+        }
+        self.file_dependency_index = file_dependency_index;
+        self.include_dependents = include_dependents;
+        self.module_dependents = module_dependents;
+    }
+
+    fn file_dependencies(&self, file: &ParsedFile) -> FileDependencyIndex {
+        let includes = file
+            .includes
+            .iter()
+            .filter_map(|include| self.resolve_include_path(include))
+            .collect();
+        let modules = file
+            .uses
+            .iter()
+            .map(|use_stmt| use_stmt.module.to_ascii_lowercase())
+            .filter(|module| intrinsics::find_intrinsic_module(module).is_none())
+            .collect();
+        FileDependencyIndex { includes, modules }
     }
 
     pub fn file(&self, path: &Path) -> Option<&ParsedFile> {

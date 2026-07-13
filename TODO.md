@@ -252,10 +252,19 @@ and run the deterministic harness for every completed point.
       document highlights and folding ranges for type-bound/generic/interface
       shapes. Fixed semantic tokens for named generic bindings and highlights
       for type-bound method aliases that target an implementation.
-- [ ] Incremental dependency invalidation. Measure large-project edits in
+- [x] Incremental dependency invalidation. Measure large-project edits in
       stdlib/fpm/ODEPACK, then cache include/module dependency edges so edits
       to included files or exported module APIs re-index only affected
       dependents while body-only edits keep the global index stable.
+      `Workspace` now caches direct include and `use module` reverse edges,
+      tracks a richer API fingerprint (signature, args, visibility, type
+      spec, attributes, binding metadata), and reparses only direct dependents
+      when an included file changes or a provider file's API fingerprint
+      changes. Name-only body edits still skip global symbol-index rebuilding.
+      Added regressions for late include insertion and module dependent
+      tracking. Full Rust suite passes; bounded stdlib/fpm/ODEPACK oracle runs
+      were attempted but the local fortls oracle checkout is currently broken
+      (`fortls.helper_functions` missing) or timing out before comparison.
 
 ## Real-Project Oracle Fixtures
 
