@@ -2744,6 +2744,36 @@ end program",
 }
 
 #[test]
+fn generic_overload_selection_uses_actual_argument_types_for_inlay_hints() {
+    let mut ws = Workspace::new();
+    let src = "module overloads\n\
+interface set\n\
+module procedure set_real\n\
+module procedure set_integer\n\
+end interface\n\
+contains\n\
+subroutine set_real(value_real)\n\
+real :: value_real\n\
+end subroutine\n\
+subroutine set_integer(value_integer)\n\
+integer :: value_integer\n\
+end subroutine\n\
+end module";
+    let app = "program app\n\
+use overloads, only: set\n\
+implicit none\n\
+integer :: i\n\
+call set(i)\n\
+end program";
+    ws.upsert_file(PathBuf::from("overloads.f90"), src);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let hints = ws.inlay_hints(Path::new("app.f90"), 4, 4);
+    let labels: Vec<_> = hints.iter().map(|hint| hint.label.as_str()).collect();
+    assert_eq!(labels, vec!["value_integer:"]);
+}
+
+#[test]
 fn diagnostics_report_missing_required_procedure_arguments() {
     let mut ws = Workspace::new();
     let src = "module log_mod\n\
@@ -5431,6 +5461,40 @@ end module";
     assert_eq!(sig.label, "draw_wide(color, width)");
     assert_eq!(sig.parameters, vec!["color", "width"]);
     assert_eq!(sig.active_parameter, 1);
+}
+
+#[test]
+fn type_bound_generic_inlay_hints_use_actual_argument_types() {
+    let mut ws = Workspace::new();
+    let src = "module m\n\
+type :: circle\n\
+contains\n\
+procedure :: draw_real => draw_circle_real\n\
+procedure :: draw_integer => draw_circle_integer\n\
+generic :: render => draw_real, draw_integer\n\
+end type\n\
+contains\n\
+subroutine draw_circle_real(self, value_real)\n\
+class(circle) :: self\n\
+real :: value_real\n\
+end subroutine\n\
+subroutine draw_circle_integer(self, value_integer)\n\
+class(circle) :: self\n\
+integer :: value_integer\n\
+end subroutine\n\
+end module";
+    let app = "program app\n\
+use m\n\
+type(circle) :: c\n\
+integer :: i\n\
+call c%render(i)\n\
+end program";
+    ws.upsert_file(PathBuf::from("types.f90"), src);
+    ws.upsert_file(PathBuf::from("app.f90"), app);
+
+    let hints = ws.inlay_hints(Path::new("app.f90"), 4, 4);
+    let labels: Vec<_> = hints.iter().map(|hint| hint.label.as_str()).collect();
+    assert_eq!(labels, vec!["value_integer:"]);
 }
 
 #[test]

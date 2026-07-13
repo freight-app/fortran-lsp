@@ -233,10 +233,15 @@ and run the deterministic harness for every completed point.
       bindings. Added hover, definition, signature-help, and call-diagnostic
       coverage for local/imported abstract-interface procedure variables,
       procedure-pointer assignments, and procedure pointer components.
-- [ ] Generic overload selection by argument characteristics. Improve generic
+- [x] Generic overload selection by argument characteristics. Improve generic
       interface and type-bound generic resolution beyond argument count and
       keyword names by using declared actual/dummy types where available,
       optional arguments, elemental/pure compatibility, and ambiguity reporting.
+      Line-call generic selection now uses a conservative unique-best score
+      over actual argument types (declared variables and literals) against
+      dummy declarations for ordinary and type-bound generics. Optional and
+      keyword compatibility remains the gate, and ambiguous type scores fall
+      back to the older non-type selector instead of guessing.
 - [ ] Semantic-token, folding, and document-highlight audit. Compare Freight's
       native editor-only surfaces against real projects and editor snapshots:
       preprocessor tokens, type-bound bindings, generic interfaces,

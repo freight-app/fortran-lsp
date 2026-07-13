@@ -1694,7 +1694,7 @@ impl Workspace {
                 }
                 return Some(params);
             }
-            if let Some(target) = self.find_generic_interface_procedure_for_args(sym, &call.args) {
+            if let Some(target) = self.find_generic_interface_procedure_for_call(sym, path, call) {
                 if target.args.is_empty() && !call.args.is_empty() {
                     return None;
                 }
@@ -1847,7 +1847,19 @@ impl Workspace {
             .find_type_method_recursive(ty, member, &mut visited)
             .or_else(|| {
                 let mut visited = HashSet::new();
-                self.find_type_generic_method_recursive_for_args(ty, member, args, &mut visited)
+                self.find_type_generic_method_recursive_for_call(
+                    ty,
+                    path,
+                    member,
+                    &LineCall {
+                        name: member.to_string(),
+                        receiver: Some(receiver.to_string()),
+                        args: args.to_vec(),
+                        start: pos,
+                        end: pos,
+                    },
+                    &mut visited,
+                )
             });
         if static_method.is_some_and(|method| !method.is_deferred) {
             return static_method;
@@ -3567,31 +3579,44 @@ impl Workspace {
         })
     }
 
-    fn find_generic_interface_procedure_for_args<'a>(
+    fn find_generic_interface_procedure_for_call<'a>(
         &'a self,
         interface: &'a Symbol,
-        args: &[LineCallArg],
+        path: &Path,
+        call: &LineCall,
     ) -> Option<&'a Symbol> {
         let candidates = self.generic_interface_procedures(interface);
+        let typed = select_unique_best_overload(
+            candidates.iter().copied().filter(|procedure| {
+                let params = self.procedure_call_parameters(procedure, &procedure.args);
+                call_args_compatible_with_params(&call.args, &params)
+            }),
+            |procedure| {
+                self.generic_actual_type_match_score(path, call, procedure, &procedure.args)
+            },
+        );
+        if typed.is_some() {
+            return typed;
+        }
         candidates
             .iter()
             .copied()
             .find(|procedure| {
                 let params = self.procedure_call_parameters(procedure, &procedure.args);
-                procedure.args.len() == args.len()
-                    && call_args_compatible_with_params(args, &params)
+                procedure.args.len() == call.args.len()
+                    && call_args_compatible_with_params(&call.args, &params)
             })
             .or_else(|| {
                 candidates.iter().copied().find(|procedure| {
                     let params = self.procedure_call_parameters(procedure, &procedure.args);
-                    call_args_compatible_with_params(args, &params)
+                    call_args_compatible_with_params(&call.args, &params)
                 })
             })
             .or_else(|| {
                 candidates
                     .iter()
                     .copied()
-                    .find(|procedure| procedure.args.len() == args.len())
+                    .find(|procedure| procedure.args.len() == call.args.len())
             })
     }
 
@@ -3621,6 +3646,70 @@ impl Workspace {
             .into_iter()
             .map(|(_, procedure)| procedure)
             .collect()
+    }
+
+    fn generic_actual_type_match_score(
+        &self,
+        path: &Path,
+        call: &LineCall,
+        procedure: &Symbol,
+        formal_args: &[String],
+    ) -> Option<usize> {
+        let file = self.files.get(path)?;
+        let line = file.source.lines().nth(call.start.line)?;
+        let mut positional = 0usize;
+        let mut matched = 0usize;
+        let mut considered = 0usize;
+        for arg in &call.args {
+            let dummy_name = if let Some(keyword) = &arg.keyword {
+                formal_args
+                    .iter()
+                    .find(|dummy| dummy.eq_ignore_ascii_case(keyword))?
+            } else {
+                let dummy = formal_args.get(positional)?;
+                positional += 1;
+                dummy
+            };
+            let Some(dummy) = self.procedure_dummy_symbol(procedure, dummy_name) else {
+                continue;
+            };
+            let Some(dummy_type) = optional_type_spec(dummy) else {
+                continue;
+            };
+            let Some(actual_type) = self.actual_argument_type(path, file, line, arg) else {
+                continue;
+            };
+            considered += 1;
+            if actual_type_compatible(&actual_type, &dummy_type) {
+                matched += 1;
+            }
+        }
+        (considered > 0).then_some(matched)
+    }
+
+    fn actual_argument_type(
+        &self,
+        path: &Path,
+        file: &ParsedFile,
+        line: &str,
+        arg: &LineCallArg,
+    ) -> Option<String> {
+        let text = line_call_arg_text(line, arg)?;
+        if let Some(literal) = literal_type_spec(text) {
+            return Some(literal.to_string());
+        }
+        let name = first_ident_local(text)?;
+        self.find_visible_symbol_at(path, arg.start, name)
+            .and_then(optional_type_spec)
+            .or_else(|| {
+                file.symbols
+                    .iter()
+                    .find(|sym| {
+                        sym.name.eq_ignore_ascii_case(name)
+                            && sym.selection_range.contains(arg.start)
+                    })
+                    .and_then(optional_type_spec)
+            })
     }
 
     fn generic_interface_links<'a>(
@@ -3869,25 +3958,27 @@ impl Workspace {
         )
     }
 
-    fn find_type_generic_method_recursive_for_args<'a>(
+    fn find_type_generic_method_recursive_for_call<'a>(
         &'a self,
         ty: &'a Symbol,
+        path: &Path,
         generic_name: &str,
-        args: &[LineCallArg],
+        call: &LineCall,
         visited: &mut HashSet<String>,
     ) -> Option<&'a Symbol> {
         let key = ty.qualified_name().to_ascii_lowercase();
         if !visited.insert(key) {
             return None;
         }
-        if let Some(method) = self.find_direct_type_generic_method_for_args(ty, generic_name, args)
+        if let Some(method) =
+            self.find_direct_type_generic_method_for_call(ty, path, generic_name, call)
         {
             return Some(method);
         }
         let parent_name = ty.extends.as_ref()?;
         let file = self.files.get(&ty.file)?;
         let parent = self.find_parent_type(file, ty, parent_name)?;
-        self.find_type_generic_method_recursive_for_args(parent, generic_name, args, visited)
+        self.find_type_generic_method_recursive_for_call(parent, path, generic_name, call, visited)
     }
 
     fn find_unique_descendant_method<'a>(
@@ -3942,10 +4033,17 @@ impl Workspace {
                 }
             }
             let mut visited = HashSet::new();
-            if let Some(method) = self.find_type_generic_method_recursive_for_args(
+            if let Some(method) = self.find_type_generic_method_recursive_for_call(
                 candidate,
+                &candidate.file,
                 method_name,
-                args,
+                &LineCall {
+                    name: method_name.to_string(),
+                    receiver: None,
+                    args: args.to_vec(),
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 0),
+                },
                 &mut visited,
             ) {
                 if !method.is_deferred {
@@ -4317,11 +4415,12 @@ impl Workspace {
         })
     }
 
-    fn find_direct_type_generic_method_for_args<'a>(
+    fn find_direct_type_generic_method_for_call<'a>(
         &'a self,
         ty: &'a Symbol,
+        path: &Path,
         generic_name: &str,
-        args: &[LineCallArg],
+        call: &LineCall,
     ) -> Option<&'a Symbol> {
         let mut candidates = Vec::new();
         for generic in self.direct_type_generics(ty) {
@@ -4335,11 +4434,30 @@ impl Workspace {
                 }
             }
         }
+        let typed = select_unique_best_overload(
+            candidates.iter().copied().filter(|method| {
+                self.method_target_symbol(method).is_some_and(|target| {
+                    let call_args = method_call_args(method, target);
+                    let params = self.procedure_call_parameters(target, &call_args);
+                    call_args_compatible_with_params(&call.args, &params)
+                })
+            }),
+            |method| {
+                self.method_target_symbol(method).and_then(|target| {
+                    let call_args = method_call_args(method, target);
+                    self.generic_actual_type_match_score(path, call, target, &call_args)
+                })
+            },
+        );
+        if typed.is_some() {
+            return typed;
+        }
         select_generic_method(candidates.iter().copied().filter(|method| {
             self.method_target_symbol(method).is_some_and(|target| {
                 let call_args = method_call_args(method, target);
                 let params = self.procedure_call_parameters(target, &call_args);
-                call_args.len() == args.len() && call_args_compatible_with_params(args, &params)
+                call_args.len() == call.args.len()
+                    && call_args_compatible_with_params(&call.args, &params)
             })
         }))
         .or_else(|| {
@@ -4347,14 +4465,14 @@ impl Workspace {
                 self.method_target_symbol(method).is_some_and(|target| {
                     let call_args = method_call_args(method, target);
                     let params = self.procedure_call_parameters(target, &call_args);
-                    call_args_compatible_with_params(args, &params)
+                    call_args_compatible_with_params(&call.args, &params)
                 })
             }))
         })
         .or_else(|| {
             select_generic_method(candidates.iter().copied().filter(|method| {
                 self.method_target_symbol(method)
-                    .is_some_and(|target| method_call_args(method, target).len() == args.len())
+                    .is_some_and(|target| method_call_args(method, target).len() == call.args.len())
             }))
         })
     }
@@ -5716,6 +5834,82 @@ fn call_args_compatible_with_params(args: &[LineCallArg], params: &[CallParamete
         .iter()
         .enumerate()
         .all(|(idx, param)| param.optional || provided[idx])
+}
+
+fn line_call_arg_text<'a>(line: &'a str, arg: &LineCallArg) -> Option<&'a str> {
+    let start = byte_idx_for_utf16_col(line, arg.start.character);
+    let end = byte_idx_for_utf16_col(line, arg.end.character);
+    let text = line.get(start..end)?.trim();
+    let text = text
+        .split_once('=')
+        .filter(|_| arg.keyword.is_some())
+        .map(|(_, value)| value.trim())
+        .unwrap_or(text);
+    (!text.is_empty()).then_some(text)
+}
+
+fn literal_type_spec(expr: &str) -> Option<&'static str> {
+    let expr = expr.trim();
+    if expr.starts_with('"') || expr.starts_with('\'') {
+        return Some("character");
+    }
+    let lower = expr.to_ascii_lowercase();
+    if matches!(lower.as_str(), ".true." | ".false.") {
+        return Some("logical");
+    }
+    if lower.contains('.') || lower.contains('e') || lower.contains('d') {
+        expr.chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit() || matches!(ch, '+' | '-'))
+            .then_some("real")
+    } else {
+        expr.chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit() || matches!(ch, '+' | '-'))
+            .then_some("integer")
+    }
+}
+
+fn actual_type_compatible(actual: &str, dummy: &str) -> bool {
+    let actual = normalize_declaration_part(actual);
+    let dummy = normalize_declaration_part(dummy);
+    if actual == dummy {
+        return true;
+    }
+    actual_base_type(&actual) == actual_base_type(&dummy)
+}
+
+fn actual_base_type(type_spec: &str) -> &str {
+    type_spec
+        .split(['(', ',', ' '])
+        .find(|part| !part.is_empty())
+        .unwrap_or(type_spec)
+}
+
+fn select_unique_best_overload<'a, I, F>(candidates: I, mut score: F) -> Option<&'a Symbol>
+where
+    I: IntoIterator<Item = &'a Symbol>,
+    F: FnMut(&Symbol) -> Option<usize>,
+{
+    let mut best = None;
+    let mut best_score = 0usize;
+    let mut tied = false;
+    for candidate in candidates {
+        let Some(candidate_score) = score(candidate) else {
+            continue;
+        };
+        if candidate_score == 0 {
+            continue;
+        }
+        if candidate_score > best_score {
+            best = Some(candidate);
+            best_score = candidate_score;
+            tied = false;
+        } else if candidate_score == best_score {
+            tied = true;
+        }
+    }
+    (!tied).then_some(best).flatten()
 }
 
 fn line_call_is_typed_array_constructor(line: &str, call: &LineCall) -> bool {
