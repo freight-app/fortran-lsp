@@ -262,9 +262,12 @@ and run the deterministic harness for every completed point.
       when an included file changes or a provider file's API fingerprint
       changes. Name-only body edits still skip global symbol-index rebuilding.
       Added regressions for late include insertion and module dependent
-      tracking. Full Rust suite passes; bounded stdlib/fpm/ODEPACK oracle runs
-      were attempted but the local fortls oracle checkout is currently broken
-      (`fortls.helper_functions` missing) or timing out before comparison.
+      tracking. Full Rust suite passes. After refreshing the local fortls
+      oracle, bounded stdlib/fpm/ODEPACK runs reach real comparisons again:
+      the default fixture passes, stdlib exposes sampled definition/reference
+      differences in included operator/to_string files, fpm exposes the known
+      null code-action harness mismatch, and ODEPACK still times out waiting
+      for fortls on the bounded sample.
 
 ## Real-Project Oracle Fixtures
 
@@ -291,13 +294,14 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 | 17 | `jacobwilliams/nlesolver-fortran` | `/tmp/freight-nlesolver-fixture` | Passes without code changes; compact nonlinear-solver and sparse-test coverage. |
 | 18 | `jacobwilliams/odepack` | `/tmp/freight-odepack-fixture` | Passes project-mode harness with documented fortls-only legacy-demo noise filtered. Covered implicit unnamed main programs, top-level include tails after modules, legacy `external f` dummy declarations, statement-function vs array-element assignment disambiguation, and COMMON block names without false parent-masking. `archive/src/opkdmain.f` remains clean in Freight (1115 symbols in direct smoke). |
 
-**Environment note (2026-07-03):** the system `python3` lost `json5`/`packaging`,
-so `python3 -m fortls` no longer runs. Use a venv (`pip install fortls`) or a
-wrapper around the `/tmp/fortls-reference` snapshot. The `stdlib` and `fpm`
-project-mode runs currently show small fortls-side masking-warning diffs that
-are **pre-existing** (A/B against a pre-change freight build produced
-byte-identical diffs) — likely fortls-version drift. Re-record those baselines
-with a pinned fortls version.
+**Environment note (2026-07-14):** `/tmp/fortls-reference` was refreshed from
+`fortran-lang/fortls` at `fc68d91` and installed editable into
+`/tmp/fortls-venv`; use `/tmp/fortls-wrapper` as the `--fortls` command. The
+system `python3 -m fortls` path still lacks package metadata/dependencies. The
+`stdlib` and `fpm` project-mode runs currently show small fortls-side
+masking-warning diffs that are **pre-existing** (A/B against a pre-change
+freight build produced byte-identical diffs) — likely fortls-version drift.
+Re-record those baselines with a pinned fortls version.
 
 ## Validation Commands
 
