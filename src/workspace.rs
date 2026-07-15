@@ -9,9 +9,9 @@ use crate::model::{
     UseStmt, Visibility,
 };
 use crate::parser::{
-    call_context, identifier_occurrences, is_fixed_comment, is_fixed_form_path, is_scope_kind,
-    member_access_at_source, scope_match_len, scopes_equal_case_insensitive, word_at_source,
-    word_range_at_source,
+    all_identifier_occurrences, call_context, identifier_occurrences, is_fixed_comment,
+    is_fixed_form_path, is_scope_kind, member_access_at_source, scope_match_len,
+    scopes_equal_case_insensitive, word_at_source, word_range_at_source,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -34,7 +34,7 @@ pub struct WorkspaceConfig {
     pub max_comment_line_length: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SymbolKey {
     file: PathBuf,
     scope: Vec<String>,
@@ -1574,14 +1574,40 @@ impl Workspace {
         }
 
         let mut tokens = BTreeMap::new();
-        for name in names {
-            for range in identifier_occurrences(&file.source, &name) {
-                let Some(sym) = self.resolve_at(path, range.start, &name) else {
-                    continue;
-                };
-                let token_type = self.semantic_token_type_for_symbol(sym);
-                insert_semantic_token(&mut tokens, range, token_type);
+        let mut file_symbols_by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, sym) in file.symbols.iter().enumerate() {
+            file_symbols_by_name
+                .entry(sym.name.to_ascii_lowercase())
+                .or_default()
+                .push(idx);
+        }
+        let mut scope_by_line: HashMap<usize, Vec<String>> = HashMap::new();
+        let mut token_type_by_symbol: HashMap<SymbolKey, u32> = HashMap::new();
+        for (name, range) in all_identifier_occurrences(&file.source) {
+            if !names.contains(&name) {
+                continue;
             }
+            let current_scope = scope_by_line
+                .entry(range.start.line)
+                .or_insert_with(|| file.scope_at(range.start));
+            let Some(sym) = self.resolve_semantic_token_at(
+                path,
+                file,
+                range.start,
+                &name,
+                file_symbols_by_name
+                    .get(&name)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                current_scope,
+            ) else {
+                continue;
+            };
+            let sym_key = SymbolKey::from_symbol(sym);
+            let token_type = *token_type_by_symbol
+                .entry(sym_key)
+                .or_insert_with(|| self.semantic_token_type_for_symbol(sym));
+            insert_semantic_token(&mut tokens, range, token_type);
         }
         for generic in &file.generic_bindings {
             for range in identifier_occurrences(&file.source, &generic.name) {
@@ -1612,6 +1638,55 @@ impl Workspace {
             }
         }
         tokens.into_values().collect()
+    }
+
+    fn resolve_semantic_token_at<'a>(
+        &'a self,
+        path: &Path,
+        file: &'a ParsedFile,
+        pos: Position,
+        name: &str,
+        candidate_indexes: &[usize],
+        current_scope: &[String],
+    ) -> Option<&'a Symbol> {
+        let point_range = Range {
+            start: pos,
+            end: pos,
+        };
+        if occurrence_is_member_selector(file, &point_range) {
+            if let Some(access) = member_access_at_source(&file.source, pos) {
+                if access.member.eq_ignore_ascii_case(name) {
+                    if let Some(method) =
+                        self.find_member_method(path, &access.receiver, &access.member)
+                    {
+                        return self.method_target_symbol(method).or(Some(method));
+                    }
+                }
+            }
+        }
+        if let Some(sym) = candidate_indexes
+            .iter()
+            .filter_map(|idx| file.symbols.get(*idx))
+            .filter(|sym| sym.selection_range.contains(pos))
+            .max_by_key(|sym| sym.scope.len())
+        {
+            return Some(sym);
+        }
+        if let Some(sym) = candidate_indexes
+            .iter()
+            .filter_map(|idx| file.symbols.get(*idx))
+            .filter_map(|sym| {
+                visible_scope_match_len(&current_scope, &sym.scope).map(|len| (len, sym))
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, sym)| sym)
+        {
+            return Some(sym);
+        }
+        if let Some(sym) = self.find_include_symbol_at(file, &current_scope, name) {
+            return Some(sym);
+        }
+        self.find_visible_symbol(path, name)
     }
 
     pub fn semantic_token_data(&self, path: &Path) -> Vec<u32> {

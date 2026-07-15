@@ -4128,6 +4128,34 @@ pub(crate) fn identifier_occurrences(source: &str, name: &str) -> Vec<Range> {
     out
 }
 
+pub(crate) fn all_identifier_occurrences(source: &str) -> Vec<(String, Range)> {
+    let mut out = Vec::new();
+    for (line_no, line) in source.lines().enumerate() {
+        let code = mask_quoted_content(&strip_inline_comment(line));
+        let bytes = code.as_bytes();
+        let mut idx = 0;
+        while idx < bytes.len() {
+            if !is_ident(bytes[idx] as char) {
+                idx += 1;
+                continue;
+            }
+            let start = idx;
+            idx += 1;
+            while idx < bytes.len() && is_ident(bytes[idx] as char) {
+                idx += 1;
+            }
+            out.push((
+                code[start..idx].to_ascii_lowercase(),
+                Range {
+                    start: Position::new(line_no, utf16_col(line, start)),
+                    end: Position::new(line_no, utf16_col(line, idx)),
+                },
+            ));
+        }
+    }
+    out
+}
+
 fn mask_quoted_content(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut quote: Option<char> = None;

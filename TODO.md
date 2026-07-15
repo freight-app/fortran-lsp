@@ -263,8 +263,11 @@ and run the deterministic harness for every completed point.
       changes. Name-only body edits still skip global symbol-index rebuilding.
       Added regressions for late include insertion and module dependent
       tracking. Full Rust suite passes. After refreshing the local fortls
-      oracle, the default fixture and bounded stdlib/fpm samples pass again.
-      ODEPACK still times out waiting for fortls on the bounded sample.
+      oracle, the default fixture and bounded stdlib/fpm/ODEPACK samples pass
+      again. Semantic tokens now use a single identifier scan with file-local
+      symbol, scope, and token-type caches, and the project harness keeps the
+      ODEPACK semantic sample to representative files instead of the 10k-line
+      fixed-form archive file.
 
 ## Real-Project Oracle Fixtures
 
@@ -295,10 +298,9 @@ All paths are local temp clones used by `scripts/fortran_lsp_compare.py`.
 `fortran-lang/fortls` at `fc68d91` and installed editable into
 `/tmp/fortls-venv`; use `/tmp/fortls-wrapper` as the `--fortls` command. The
 system `python3 -m fortls` path still lacks package metadata/dependencies. The
-`stdlib --max-files 5` and `fpm --max-files 5` pass with this wrapper after the
-submodule implementation-definition fix and bounded-probe harness updates.
-ODEPACK still times out waiting for fortls response id 14003 even with
-`--request-timeout 90`.
+`stdlib --max-files 5`, `fpm --max-files 5`, and `ODEPACK --max-files 5` gates
+pass with this wrapper after the submodule implementation-definition fix,
+semantic-token optimization, and bounded-probe harness updates.
 
 ## Validation Commands
 
