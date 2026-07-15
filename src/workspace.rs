@@ -704,11 +704,7 @@ impl Workspace {
 
     pub fn definition(&self, path: &Path, pos: Position, source: &str) -> Option<&Symbol> {
         if let Some(sym) = self.files.get(path).and_then(|file| file.symbol_at(pos)) {
-            return Some(
-                self.module_procedure_prototype(sym)
-                    .or_else(|| self.method_target_symbol(sym))
-                    .unwrap_or(sym),
-            );
+            return Some(self.method_target_symbol(sym).unwrap_or(sym));
         }
         if let Some(access) = member_access_at_source(source, pos) {
             if let Some(component) = self.find_procedure_pointer_component_at(

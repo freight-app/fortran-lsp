@@ -731,8 +731,8 @@ end submodule";
     let definition = ws
         .definition(Path::new("math_impl.f90"), Position::new(2, 18), submodule)
         .unwrap();
-    assert_eq!(definition.file, PathBuf::from("math.f90"));
-    assert_eq!(definition.args, vec!["a", "x", "y"]);
+    assert_eq!(definition.file, PathBuf::from("math_impl.f90"));
+    assert_eq!(definition.selection_range.start, Position::new(2, 17));
     let implementation = ws
         .implementation_location(Path::new("math.f90"), Position::new(3, 18), module)
         .unwrap();
@@ -795,8 +795,8 @@ end submodule";
     let definition = ws
         .definition(Path::new("io_impl.f90"), Position::new(7, 18), submodule)
         .unwrap();
-    assert_eq!(definition.file, PathBuf::from("io.f90"));
-    assert_eq!(definition.selection_range.start, Position::new(11, 18));
+    assert_eq!(definition.file, PathBuf::from("io_impl.f90"));
+    assert_eq!(definition.selection_range.start, Position::new(7, 18));
     let diagnostics = ws.diagnostics(Path::new("io_impl.f90"));
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
@@ -839,6 +839,60 @@ end submodule";
     assert_eq!(
         implementation.file,
         PathBuf::from("stdlib_hashmap_chaining.f90")
+    );
+    assert_eq!(implementation.range.start, Position::new(2, 21));
+}
+
+#[test]
+fn submodule_module_function_definition_stays_on_implementation() {
+    let mut ws = Workspace::new();
+    let module = "module stdlib_ansi\n\
+type :: ansi_code\n\
+end type\n\
+interface to_string\n\
+  pure module function to_string_ansi_code(code) result(str)\n\
+    type(ansi_code), intent(in) :: code\n\
+    character(len=:), allocatable :: str\n\
+  end function to_string_ansi_code\n\
+end interface to_string\n\
+end module";
+    let submodule = "submodule (stdlib_ansi) stdlib_ansi_to_string\n\
+contains\n\
+  pure module function to_string_ansi_code(code) result(str)\n\
+    type(ansi_code), intent(in) :: code\n\
+    character(len=:), allocatable :: str\n\
+    str = ''\n\
+  end function to_string_ansi_code\n\
+end submodule";
+    ws.upsert_file(PathBuf::from("stdlib_ansi.f90"), module);
+    ws.upsert_file(PathBuf::from("stdlib_ansi_to_string.f90"), submodule);
+
+    let definition = ws
+        .definition(
+            Path::new("stdlib_ansi_to_string.f90"),
+            Position::new(2, 21),
+            submodule,
+        )
+        .expect("module function definition");
+    assert_eq!(definition.file, PathBuf::from("stdlib_ansi_to_string.f90"));
+    assert_eq!(definition.selection_range.start, Position::new(2, 21));
+
+    let references = ws.references(
+        Path::new("stdlib_ansi_to_string.f90"),
+        Position::new(2, 21),
+        submodule,
+    );
+    assert!(references.iter().any(|loc| {
+        loc.file == PathBuf::from("stdlib_ansi_to_string.f90")
+            && loc.range.start == Position::new(2, 21)
+    }));
+
+    let implementation = ws
+        .implementation_location(Path::new("stdlib_ansi.f90"), Position::new(4, 23), module)
+        .expect("prototype implementation");
+    assert_eq!(
+        implementation.file,
+        PathBuf::from("stdlib_ansi_to_string.f90")
     );
     assert_eq!(implementation.range.start, Position::new(2, 21));
 }
