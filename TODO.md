@@ -223,9 +223,8 @@ and run the deterministic harness for every completed point.
       `#line` / line-marker tolerance, and multiline macro bodies with
       continuations. Port only with focused fixtures or real-project evidence.
       Added focused regressions for all listed shapes; `cargo test -p
-      fortran-lsp` passes. The deterministic harness was attempted, but the
-      local `/tmp/fortls-reference` oracle is missing its
-      `fortls.parsers.internal.ast` source module and exits before comparison.
+      fortran-lsp` passes. The repaired `/tmp/fortls-wrapper` oracle is now the
+      local differential command.
 - [x] Procedure pointer and callback modelling. Index and resolve
       `procedure(interface), pointer :: cb`, dummy procedure arguments,
       procedure-pointer assignments, calls through procedure variables, and
@@ -312,10 +311,12 @@ cargo test -p fortran-lsp
 cargo build -p freight
 
 python3 -m py_compile scripts/fortran_lsp_compare.py
-python3 scripts/fortran_lsp_compare.py --freight target/debug/freight \
+python3 scripts/fortran_lsp_compare.py --fortls /tmp/fortls-wrapper \
+  --freight target/debug/freight \
   --request-timeout 30 --diagnostic-timeout 5 --diagnostic-quiet 0.35
 
-python3 scripts/fortran_lsp_compare.py --freight target/debug/freight \
+python3 scripts/fortran_lsp_compare.py --fortls /tmp/fortls-wrapper \
+  --freight target/debug/freight \
   --project /tmp/freight-stdlib-fixture --max-files 0 \
   --request-timeout 90 --diagnostic-timeout 40 --diagnostic-quiet 5.0
 ```
