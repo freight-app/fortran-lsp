@@ -2,7 +2,7 @@
 name = "fortran-lsp"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+license = "MIT"
 description = "Native Rust Fortran language intelligence primitives for freight lsp"
 
 [lib]
