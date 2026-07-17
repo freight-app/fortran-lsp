@@ -1,11 +1,12 @@
 # fortran-lsp
 
-Native Rust Fortran language-intelligence primitives for `freight lsp`.
+Native Rust Fortran language intelligence for Freight and standalone editors.
 
-`fortran-lsp` is the Fortran engine embedded by Freight. It is not a Python
-process and it is not a standalone language-server binary. The crate exposes a
-parser, workspace index, diagnostics, and LSP-shaped query primitives that the
-main `freight lsp` server calls directly.
+`fortran-lsp` is a Rust Fortran language server engine. It is not a Python
+process and it does not need `fortls` at runtime. The crate exposes a parser,
+workspace index, diagnostics, and LSP-shaped query primitives that `freight lsp`
+embeds directly, and it also ships a small `fortran-lsp` executable for people
+who want to run the Fortran server by itself.
 
 ## What It Does
 
@@ -33,6 +34,40 @@ The end result is that a Freight project no longer needs a runtime `fortls`
 subprocess for normal Fortran IDE features. `fortls` remains useful as a
 reference oracle for differential testing.
 
+## Which Binary Should I Use?
+
+For Freight projects, use:
+
+```sh
+freight lsp
+```
+
+That gives you manifest-aware Fortran support alongside Freight manifest,
+C/C++, and assembly language intelligence.
+
+For a plain Fortran project or an editor setup that wants only this server, use:
+
+```sh
+fortran-lsp
+```
+
+The standalone executable speaks standard LSP over stdio. It indexes the
+workspace root plus common `src`, `include`, and `inc` directories, and accepts
+optional initialization settings:
+
+```json
+{
+  "includeRoots": ["mod", "generated"],
+  "maxLineLength": 132,
+  "maxCommentLineLength": 100,
+  "predefinedMacros": {
+    "USE_MPI": "1"
+  }
+}
+```
+
+`predefinedMacros` may also be an array such as `["USE_MPI=1", "DEBUG"]`.
+
 ## How Freight Uses It
 
 `freight lsp` registers a native `FortranIndexer` by default. The indexer wraps
@@ -40,13 +75,8 @@ reference oracle for differential testing.
 predefined preprocessor macros, and `[language.fortran]` settings, then maps the
 crate's responses to JSON-RPC LSP responses.
 
-For end users, the normal entry point is:
-
-```sh
-freight lsp
-```
-
-Editor clients should talk to `freight lsp`, not to this crate directly.
+Freight users should prefer `freight lsp` because it adds manifest context that
+a standalone language server cannot infer by itself.
 
 ## Library Example
 
@@ -107,6 +137,7 @@ The crate is tested at three levels:
 ```sh
 cargo fmt -p fortran-lsp
 cargo test -p fortran-lsp
+cargo run -p fortran-lsp -- --version
 cargo build -p freight
 ```
 
@@ -130,8 +161,9 @@ fixture table and historical hardening notes.
 
 ## Scope
 
-This crate deliberately does not implement LSP transport, process management,
-editor settings, or manifest discovery. Those belong to `freight lsp`.
+This crate implements enough LSP transport to run as a standalone stdio server.
+It deliberately does not implement Freight manifest discovery, dependency graph
+resolution, or editor-specific settings. Those belong to `freight lsp`.
 
 This crate does implement the Fortran language model that Freight needs:
 parsing, indexing, diagnostics, and editor query primitives.

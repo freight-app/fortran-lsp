@@ -1,8 +1,8 @@
 //! Native Rust Fortran language intelligence primitives.
 //!
-//! This crate is the start of a Rust port of `fortls` concepts. It deliberately
-//! exposes parser/indexer primitives rather than an LSP transport server so
-//! callers such as `freight lsp` can embed it directly.
+//! This crate is a Rust port of `fortls` concepts. The primary API is the
+//! embeddable parser/indexer used by `freight lsp`; the package also ships a
+//! small stdio LSP binary for users who want to run the Fortran engine directly.
 
 mod intrinsics;
 mod model;
